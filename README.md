@@ -4,6 +4,10 @@
 - Go 1.24.5
 - PostgreSQL 17.5
 
+## Миграции
+- Применение: `go run ./cmd/migrate -dir migrations`
+- Восстановление dirty-версии: `go run ./cmd/migrate -dir migrations -force <версия>`
+
 ## Структура модулей
 - auth: каркас слоя аутентификации.
 - auth/alor: заготовка интеграции с Alor для авторизации.
