@@ -34,5 +34,6 @@
     "NMTP",
     "AFLT",
     "SPBE"
-  ]
+  ],
+  "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/invest_intraday_db?sslmode=disable&application_name=invest_intraday"
 }
