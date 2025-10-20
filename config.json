@@ -1,5 +1,9 @@
 {
   "alor_token": "bc5f42b1-dedc-40c3-a870-05addb5495f8",
+  "moex_passport": {
+    "login": "ledo02@yandex.ru",
+    "password": "fuL-w9p-XRn-4Bn"
+  },
   "moex_tickers": [
     "SBER",
     "GAZP",
