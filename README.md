@@ -4,6 +4,9 @@
 - Go 1.24.5
 - PostgreSQL 17.5
 
+## Интеграции
+- При обращении к "MOEX ISS" используйте авторизацию через "MOEX Passport", чтобы избежать ограничений на запросы.
+
 ## Миграции
 - Применение: `go run ./cmd/migrate -dir migrations`
 - Восстановление dirty-версии: `go run ./cmd/migrate -dir migrations -force <версия>`
