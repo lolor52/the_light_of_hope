@@ -1,3 +1,34 @@
 {
-  "alor_token": "bc5f42b1-dedc-40c3-a870-05addb5495f8"
+  "alor_token": "bc5f42b1-dedc-40c3-a870-05addb5495f8",
+  "moex_tickers": [
+    "SBER",
+    "GAZP",
+    "LKOH",
+    "NVTK",
+    "ROSN",
+    "GMKN",
+    "NLMK",
+    "CHMF",
+    "PLZL",
+    "TATN",
+    "TATNP",
+    "SNGS",
+    "SNGSP",
+    "MTSS",
+    "ALRS",
+    "MGNT",
+    "MOEX",
+    "VTBR",
+    "PHOR",
+    "RUAL",
+    "OZON",
+    "POSI",
+    "X5",
+    "SIBN",
+    "BSPB",
+    "CBOM",
+    "NMTP",
+    "AFLT",
+    "SPBE"
+  ]
 }
