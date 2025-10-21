@@ -97,8 +97,9 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 
 	date := startDate
 	tradingSessionsFound := 0
+	sessionsTarget := s.cfg.TickersFillingSessions
 
-	for tradingSessionsFound < 5 {
+	for tradingSessionsFound < sessionsTarget {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
