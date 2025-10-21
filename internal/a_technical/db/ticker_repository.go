@@ -103,3 +103,66 @@ INSERT INTO ticker (
 
 	return nil
 }
+
+// ListLastActiveSessions возвращает последние активные торговые сессии указанного тикера.
+func (r *TickerRepository) ListLastActiveSessions(ctx context.Context, name string, limit int) ([]models.Ticker, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	const query = `
+SELECT trading_session_date,
+       trading_session_active,
+       ticker_name,
+       secid,
+       boardid,
+       vwap,
+       val,
+       vah,
+       liquidity,
+       volatility,
+       flat_trend_filter
+  FROM ticker
+ WHERE ticker_name = $1
+   AND trading_session_active = true
+ ORDER BY trading_session_date DESC
+ LIMIT $2
+`
+
+	rows, err := r.db.QueryContext(ctx, query, name, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list ticker sessions: %w", err)
+	}
+	defer rows.Close()
+
+	sessions := make([]models.Ticker, 0, limit)
+	for rows.Next() {
+		var entity models.Ticker
+		if err := rows.Scan(
+			&entity.TradingSessionDate,
+			&entity.TradingSessionActive,
+			&entity.TickerName,
+			&entity.SecID,
+			&entity.BoardID,
+			&entity.VWAP,
+			&entity.VAL,
+			&entity.VAH,
+			&entity.Liquidity,
+			&entity.Volatility,
+			&entity.FlatTrendFilter,
+		); err != nil {
+			return nil, fmt.Errorf("scan ticker session: %w", err)
+		}
+		sessions = append(sessions, entity)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate ticker sessions: %w", err)
+	}
+
+	for i, j := 0, len(sessions)-1; i < j; i, j = i+1, j-1 {
+		sessions[i], sessions[j] = sessions[j], sessions[i]
+	}
+
+	return sessions, nil
+}
