@@ -38,7 +38,6 @@ func FromFile(path string) (Config, error) {
 	defer file.Close()
 
 	decoder := json.NewDecoder(file)
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&cfg); err != nil {
 		return cfg, fmt.Errorf("decode config: %w", err)
 	}
