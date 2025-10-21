@@ -16,7 +16,6 @@ const baseIssURL = "https://iss.moex.com/iss"
 // Client инкапсулирует обращение к MOEX ISS c авторизацией через Passport.
 type Client struct {
 	httpClient *http.Client
-	marker     string
 }
 
 // NewClient выполняет авторизацию и возвращает готовый клиент MOEX ISS.
@@ -28,13 +27,7 @@ func NewClient(ctx context.Context, login, password string) (*Client, error) {
 
 	return &Client{
 		httpClient: session.HTTPClient(),
-		marker:     session.Marker(),
 	}, nil
-}
-
-// Marker возвращает значение заголовка X-MicexPassport-Marker, полученное при авторизации.
-func (c *Client) Marker() string {
-	return c.marker
 }
 
 // getJSON выполняет GET-запрос и декодирует JSON-ответ.
