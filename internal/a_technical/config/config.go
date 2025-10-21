@@ -1,9 +1,12 @@
 package config
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // MOEXTicker описывает параметры инструмента для сбора данных через MOEX ISS.
@@ -31,14 +34,17 @@ type Config struct {
 func FromFile(path string) (Config, error) {
 	var cfg Config
 
-	file, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return cfg, fmt.Errorf("open config: %w", err)
 	}
-	defer file.Close()
 
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&cfg); err != nil {
+	cleaned, err := removeJSONComments(data)
+	if err != nil {
+		return cfg, fmt.Errorf("prepare config: %w", err)
+	}
+
+	if err := json.Unmarshal(cleaned, &cfg); err != nil {
 		return cfg, fmt.Errorf("decode config: %w", err)
 	}
 
@@ -47,4 +53,26 @@ func FromFile(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func removeJSONComments(data []byte) ([]byte, error) {
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	var builder strings.Builder
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+
+		builder.WriteString(line)
+		builder.WriteByte('\n')
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return []byte(builder.String()), nil
 }
