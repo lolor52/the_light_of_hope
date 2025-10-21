@@ -1,4 +1,5 @@
 CREATE TABLE IF NOT EXISTS ticker (
+    id BIGSERIAL PRIMARY KEY,
     trading_session_date DATE NOT NULL,
     trading_session_active BOOLEAN NOT NULL,
     ticker_name TEXT NOT NULL,
