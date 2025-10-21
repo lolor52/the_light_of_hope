@@ -123,6 +123,8 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 	date := startDate
 	tradingSessionsFound := 0
 	sessionsTarget := s.cfg.TickersFillingSessions
+	maxInactiveDays := s.cfg.TickersFillingMaxInactiveDays
+	consecutiveInactiveDays := 0
 
 	for tradingSessionsFound < sessionsTarget {
 		select {
@@ -138,11 +140,21 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 
 		sessionActive := historyRow != nil && historyRow.Volume > 0
 
+		if sessionActive {
+			consecutiveInactiveDays = 0
+		} else if maxInactiveDays > 0 {
+			consecutiveInactiveDays++
+		}
+
 		_, err = s.repo.GetByDateAndName(ctx, tickerCfg.Ticker, date)
 		if err == nil {
 			stats.Existing++
 			if sessionActive {
 				tradingSessionsFound++
+			}
+			if !sessionActive && maxInactiveDays > 0 && consecutiveInactiveDays >= maxInactiveDays {
+				log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.Ticker, maxInactiveDays)
+				return stats, pending, nil
 			}
 			// запись уже есть, перейдём к следующей дате
 			date = date.AddDate(0, 0, -1)
@@ -161,10 +173,14 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 					SecID:                tickerCfg.SecID,
 					BoardID:              tickerCfg.BoardID,
 				}
-				if err := s.repo.Insert(ctx, entity); err != nil {
-					return stats, nil, err
+				if insertErr := s.repo.Insert(ctx, entity); insertErr != nil {
+					return stats, nil, insertErr
 				}
 				stats.Created++
+			}
+			if maxInactiveDays > 0 && consecutiveInactiveDays >= maxInactiveDays {
+				log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.Ticker, maxInactiveDays)
+				return stats, pending, nil
 			}
 			date = date.AddDate(0, 0, -1)
 			continue
