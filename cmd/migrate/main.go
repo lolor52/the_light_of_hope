@@ -11,13 +11,11 @@ import (
 	_ "github.com/lib/pq"
 
 	"invest_intraday/internal/a_submodule/migrate"
-	"invest_intraday/internal/a_technical/config"
 )
 
 func main() {
 	migrationsDir := flag.String("dir", "migrations", "путь до каталога с миграциями")
 	forceVersion := flag.Int("force", -1, "принудительно установить версию миграции")
-	configPath := flag.String("config", "config.json", "путь до конфигурационного файла")
 	flag.Parse()
 
 	loc, err := time.LoadLocation("Europe/Moscow")
@@ -28,14 +26,7 @@ func main() {
 
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		cfg, err := config.FromFile(*configPath)
-		if err != nil {
-			log.Fatalf("переменная окружения DATABASE_URL не задана, а конфигурация не загружена: %v", err)
-		}
-		if cfg.DatabaseURL == "" {
-			log.Fatal("DATABASE_URL не задан ни в окружении, ни в конфигурации")
-		}
-		databaseURL = cfg.DatabaseURL
+		log.Fatal("переменная окружения DATABASE_URL не задана")
 	}
 
 	db, err := sql.Open("postgres", databaseURL)
