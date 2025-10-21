@@ -11,6 +11,7 @@ import (
 	_ "github.com/lib/pq"
 
 	"invest_intraday/internal/a_submodule/migrate"
+	"invest_intraday/internal/a_technical/config"
 )
 
 func main() {
@@ -26,7 +27,21 @@ func main() {
 
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		log.Fatal("переменная окружения DATABASE_URL не задана")
+		cfgPath := os.Getenv("CONFIG_PATH")
+		if cfgPath == "" {
+			cfgPath = "config.json"
+		}
+
+		cfg, err := config.FromFile(cfgPath)
+		if err != nil {
+			log.Fatalf("не удалось загрузить конфигурацию из %s: %v", cfgPath, err)
+		}
+
+		if cfg.DatabaseURL == "" {
+			log.Fatal("переменная окружения DATABASE_URL не задана и отсутствует поле DATABASE_URL в конфигурации")
+		}
+
+		databaseURL = cfg.DatabaseURL
 	}
 
 	db, err := sql.Open("postgres", databaseURL)
