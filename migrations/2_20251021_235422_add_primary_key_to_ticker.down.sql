@@ -1,0 +1,4 @@
+ALTER TABLE ticker
+    DROP COLUMN IF EXISTS id;
+
+DROP SEQUENCE IF EXISTS ticker_id_seq;
