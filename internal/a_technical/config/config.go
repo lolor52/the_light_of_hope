@@ -21,9 +21,10 @@ type PassportCredentials struct {
 
 // Config агрегирует необходимые параметры запуска модуля выбора тикеров.
 type Config struct {
-	MOEXPassport PassportCredentials `json:"moex_passport"`
-	MOEXTickers  []MOEXTicker        `json:"moex_tickers_secid_boardid"`
-	DatabaseURL  string              `json:"DATABASE_URL"`
+	MOEXPassport           PassportCredentials `json:"moex_passport"`
+	MOEXTickers            []MOEXTicker        `json:"moex_tickers_secid_boardid"`
+	DatabaseURL            string              `json:"DATABASE_URL"`
+	TickersFillingSessions int                 `json:"tickers_filling_sessions"`
 }
 
 // FromFile загружает конфигурацию из указанного JSON-файла.
@@ -40,6 +41,10 @@ func FromFile(path string) (Config, error) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&cfg); err != nil {
 		return cfg, fmt.Errorf("decode config: %w", err)
+	}
+
+	if cfg.TickersFillingSessions <= 0 {
+		cfg.TickersFillingSessions = 5
 	}
 
 	return cfg, nil
