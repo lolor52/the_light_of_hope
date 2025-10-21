@@ -1,7 +1,9 @@
 {
+  "_comment": "Конфигурация приложения для заполнения тикеров",
   "alor_token": "bc5f42b1-dedc-40c3-a870-05addb5495f8",
   "tickers_filling_sessions": 6,
   "moex_passport": {
+    "_comment": "Учетные данные для авторизации на MOEX Passport",
     "login": "ledo02@yandex.ru",
     "password": "fuL-w9p-XRn-4Bn"
   },
@@ -36,5 +38,6 @@
     { "ticker": "AFLT", "SecID": "AFLT", "BOARDID": "TQBR" },
     { "ticker": "SPBE", "SecID": "SPBE", "BOARDID": "TQBR" }
   ],
-  "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/invest_intraday_db?sslmode=disable"
+  "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/invest_intraday_db?sslmode=disable",
+  "_comment_database": "Строка подключения к базе данных"
 }
