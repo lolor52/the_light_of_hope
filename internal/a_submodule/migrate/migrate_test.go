@@ -15,13 +15,13 @@ func TestEnsureDownMigrations(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, "1_20240101_010101_init.down.sql"))
 	mustWrite(t, filepath.Join(dir, "legacy.sql"))
 
-	if err := ensureDownMigrations(dir); err != nil {
+	if err := ensureDownMigrations(os.DirFS(dir)); err != nil {
 		t.Fatalf("ensureDownMigrations returned error: %v", err)
 	}
 
 	mustWrite(t, filepath.Join(dir, "2_20240202_020202_missing.up.sql"))
 
-	if err := ensureDownMigrations(dir); err == nil {
+	if err := ensureDownMigrations(os.DirFS(dir)); err == nil {
 		t.Fatal("expected error for missing down migration, got nil")
 	}
 }

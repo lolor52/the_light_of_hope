@@ -4,12 +4,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
+	migrateiofs "github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
 // Up применяет доступные миграции. Если миграции уже применены, возвращает nil.
@@ -73,7 +76,9 @@ func newMigrator(db *sql.DB, migrationsDir string) (*migrate.Migrate, func() err
 		return nil, nil, fmt.Errorf("migrations path %q is not a directory", absDir)
 	}
 
-	if err := ensureDownMigrations(absDir); err != nil {
+	dirFS := os.DirFS(absDir)
+
+	if err := ensureDownMigrations(dirFS); err != nil {
 		return nil, nil, err
 	}
 
@@ -82,9 +87,13 @@ func newMigrator(db *sql.DB, migrationsDir string) (*migrate.Migrate, func() err
 		return nil, nil, fmt.Errorf("failed to create postgres driver: %w", err)
 	}
 
-	sourceURL := fmt.Sprintf("file://%s", absDir)
+	sourceDriver, err := migrateiofs.New(dirFS, ".")
+	if err != nil {
+		cleanupErr := driver.Close()
+		return nil, nil, errors.Join(fmt.Errorf("failed to create iofs source: %w", err), cleanupErr)
+	}
 
-	m, err := migrate.NewWithDatabaseInstance(sourceURL, "postgres", driver)
+	m, err := migrate.NewWithInstance("iofs", sourceDriver, "postgres", driver)
 	if err != nil {
 		cleanupErr := driver.Close()
 		return nil, nil, errors.Join(fmt.Errorf("failed to create migrator: %w", err), cleanupErr)
@@ -98,26 +107,26 @@ func newMigrator(db *sql.DB, migrationsDir string) (*migrate.Migrate, func() err
 	return m, cleanup, nil
 }
 
-func ensureDownMigrations(dir string) error {
-	upEntries, err := filepath.Glob(filepath.Join(dir, "*.up.sql"))
+func ensureDownMigrations(fsys fs.FS) error {
+	upEntries, err := fs.Glob(fsys, "*.up.sql")
 	if err != nil {
 		return fmt.Errorf("failed to list up migrations: %w", err)
 	}
 
 	downFiles := map[string]struct{}{}
-	downEntries, err := filepath.Glob(filepath.Join(dir, "*.down.sql"))
+	downEntries, err := fs.Glob(fsys, "*.down.sql")
 	if err != nil {
 		return fmt.Errorf("failed to list down migrations: %w", err)
 	}
 	for _, down := range downEntries {
-		base := strings.TrimSuffix(filepath.Base(down), ".down.sql")
+		base := strings.TrimSuffix(path.Base(down), ".down.sql")
 		downFiles[base] = struct{}{}
 	}
 
 	for _, up := range upEntries {
-		base := strings.TrimSuffix(filepath.Base(up), ".up.sql")
+		base := strings.TrimSuffix(path.Base(up), ".up.sql")
 		if _, ok := downFiles[base]; !ok {
-			return fmt.Errorf("missing down migration for %s", filepath.Base(up))
+			return fmt.Errorf("missing down migration for %s", path.Base(up))
 		}
 	}
 
