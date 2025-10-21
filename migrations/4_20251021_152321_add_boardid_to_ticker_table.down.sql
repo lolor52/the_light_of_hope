@@ -1,0 +1,2 @@
+ALTER TABLE ticker
+    DROP COLUMN IF EXISTS boardid;
