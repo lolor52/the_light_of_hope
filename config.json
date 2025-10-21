@@ -1,10 +1,14 @@
 {
+  // Токен авторизации для API брокера Alor.
   "alor_token": "bc5f42b1-dedc-40c3-a870-05addb5495f8",
+  // Количество торговых сессий, которые нужно заполнить котировками.
   "tickers_filling_sessions": 6,
+  // Учетные данные для авторизации в MOEX Passport.
   "moex_passport": {
     "login": "ledo02@yandex.ru",
     "password": "fuL-w9p-XRn-4Bn"
   },
+  // Соответствие тикеров MOEX их SecID и BOARDID.
   "moex_tickers_secid_boardid": [
     { "ticker": "SBER", "SecID": "SBER", "BOARDID": "TQBR" },
     { "ticker": "GAZP", "SecID": "GAZP", "BOARDID": "TQBR" },
@@ -36,5 +40,6 @@
     { "ticker": "AFLT", "SecID": "AFLT", "BOARDID": "TQBR" },
     { "ticker": "SPBE", "SecID": "SPBE", "BOARDID": "TQBR" }
   ],
+  // Строка подключения к базе данных приложения.
   "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/invest_intraday_db?sslmode=disable"
 }
