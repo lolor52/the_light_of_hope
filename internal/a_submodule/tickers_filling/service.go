@@ -81,6 +81,8 @@ func (s *Service) Run(ctx context.Context) (RunStats, error) {
 	var stats RunStats
 	var pending []pendingRecord
 
+	log.Printf("tickers_filling: запуск модуля")
+
 	loc, err := time.LoadLocation("Europe/Moscow")
 	if err != nil {
 		return stats, fmt.Errorf("load moscow location: %w", err)
