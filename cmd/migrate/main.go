@@ -6,16 +6,19 @@ import (
 	"flag"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
 
 	"invest_intraday/internal/a_submodule/migrate"
+	"invest_intraday/internal/a_technical/config"
 )
 
 func main() {
 	migrationsDir := flag.String("dir", "migrations", "путь до каталога с миграциями")
 	forceVersion := flag.Int("force", -1, "принудительно установить версию миграции")
+	configPathFlag := flag.String("config", "", "путь до конфигурационного файла")
 	flag.Parse()
 
 	loc, err := time.LoadLocation("Europe/Moscow")
@@ -24,9 +27,9 @@ func main() {
 	}
 	time.Local = loc
 
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		log.Fatal("переменная окружения DATABASE_URL не задана")
+	databaseURL := resolveDatabaseURL(*configPathFlag)
+	if strings.TrimSpace(databaseURL) == "" {
+		log.Fatal("не удалось получить DATABASE_URL из окружения или конфигурации")
 	}
 
 	db, err := sql.Open("postgres", databaseURL)
@@ -59,4 +62,25 @@ func main() {
 	}
 
 	log.Println("миграции успешно применены")
+}
+
+func resolveDatabaseURL(configPathFlag string) string {
+	if envURL := os.Getenv("DATABASE_URL"); strings.TrimSpace(envURL) != "" {
+		return envURL
+	}
+
+	cfgPath := configPathFlag
+	if strings.TrimSpace(cfgPath) == "" {
+		cfgPath = os.Getenv("CONFIG_PATH")
+	}
+	if strings.TrimSpace(cfgPath) == "" {
+		cfgPath = "config.json"
+	}
+
+	cfg, err := config.FromFile(cfgPath)
+	if err != nil {
+		log.Fatalf("не удалось загрузить конфигурацию %q: %v", cfgPath, err)
+	}
+
+	return cfg.DatabaseURL
 }
