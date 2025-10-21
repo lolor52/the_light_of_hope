@@ -1,0 +1,2 @@
+ALTER TABLE ticker
+    DROP CONSTRAINT IF EXISTS ticker_pkey;
