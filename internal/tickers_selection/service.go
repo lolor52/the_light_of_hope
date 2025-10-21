@@ -8,6 +8,7 @@ import (
 	"log"
 	"sort"
 	"strconv"
+	"strings"
 
 	"invest_intraday/internal/a_submodule/tickers_filling"
 	"invest_intraday/internal/a_technical/config"
@@ -167,6 +168,17 @@ func (s *Service) selectTickers(ctx context.Context) ([]Result, error) {
 	if len(results) > selectionCount {
 		results = results[:selectionCount]
 	}
+
+	if len(results) == 0 {
+		log.Printf("tickers_selection: тикеры не выбраны")
+		return results, nil
+	}
+
+	tickers := make([]string, len(results))
+	for i, item := range results {
+		tickers[i] = item.Ticker
+	}
+	log.Printf("tickers_selection: выбраны тикеры: %s", strings.Join(tickers, ", "))
 
 	return results, nil
 }
