@@ -3,6 +3,8 @@
   "alor_token": "bc5f42b1-dedc-40c3-a870-05addb5495f8",
   // Количество торговых сессий, для которых заполняются данные по тикерам
   "tickers_filling_sessions": 6,
+  // Максимальное количество дней без торгов для продолжения поиска исторических данных
+  "tickers_filling_max_inactive_days": 20,
   // Учетные данные для авторизации на MOEX Passport
   "moex_passport": {
     "login": "ledo02@yandex.ru",
