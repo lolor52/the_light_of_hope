@@ -2,14 +2,12 @@ package moexpassport
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -18,15 +16,13 @@ const (
 	langQueryParam     = "lang"
 	langValue          = "ru"
 	passportCookie     = "MicexPassportCert"
-	markerHeader       = "X-MicexPassport-Marker"
-	grantedMarker      = "granted"
+	issBaseURL         = "https://iss.moex.com/"
 	defaultHTTPTimeout = 15 * time.Second
 )
 
 // Session представляет авторизованную HTTP-сессию MOEX Passport.
 type Session struct {
 	httpClient *http.Client
-	marker     string
 }
 
 // Authenticate выполняет авторизацию в MOEX Passport и возвращает сессию
@@ -55,7 +51,6 @@ func Authenticate(ctx context.Context, login, password string) (*Session, error)
 		return nil, fmt.Errorf("create auth request: %w", err)
 	}
 	req.SetBasicAuth(login, password)
-	req.Header.Set("Accept", "application/json")
 
 	query := req.URL.Query()
 	query.Set(langQueryParam, langValue)
@@ -73,41 +68,13 @@ func Authenticate(ctx context.Context, login, password string) (*Session, error)
 		return nil, fmt.Errorf("passport auth unexpected status: %s", resp.Status)
 	}
 
-	marker := resp.Header.Get(markerHeader)
-	if marker == "" {
-		log.Printf("passport auth marker header %s is missing", markerHeader)
-	} else if !strings.EqualFold(marker, grantedMarker) {
-		log.Printf("passport auth marker is not granted: %s", marker)
-		return nil, fmt.Errorf("passport auth marker is not granted: %s", marker)
-	}
-
-	var payload struct {
-		Success bool   `json:"success"`
-		Error   string `json:"error"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		log.Printf("decode passport auth response failed: %v", err)
-		return nil, fmt.Errorf("decode passport auth response: %w", err)
-	}
-	if !payload.Success {
-		if payload.Error == "" {
-			payload.Error = "unknown passport error"
-		}
-		log.Printf("passport auth failed: %s", payload.Error)
-		return nil, errors.New(payload.Error)
-	}
-
-	requestURL := resp.Request.URL
-	if requestURL == nil {
-		parsed, parseErr := url.Parse(authEndpointURL)
-		if parseErr != nil {
-			return nil, fmt.Errorf("determine auth url: %w", parseErr)
-		}
-		requestURL = parsed
+	issURL, err := url.Parse(issBaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse iss url: %w", err)
 	}
 
 	var cookieFound bool
-	for _, cookie := range jar.Cookies(requestURL) {
+	for _, cookie := range jar.Cookies(issURL) {
 		if cookie.Name == passportCookie {
 			cookieFound = true
 			break
@@ -120,16 +87,10 @@ func Authenticate(ctx context.Context, login, password string) (*Session, error)
 
 	return &Session{
 		httpClient: httpClient,
-		marker:     marker,
 	}, nil
 }
 
 // HTTPClient возвращает авторизованный HTTP-клиент.
 func (s *Session) HTTPClient() *http.Client {
 	return s.httpClient
-}
-
-// Marker возвращает значение заголовка X-MicexPassport-Marker, полученное при авторизации.
-func (s *Session) Marker() string {
-	return s.marker
 }
