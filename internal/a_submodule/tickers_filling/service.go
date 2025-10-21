@@ -25,6 +25,12 @@ type Service struct {
 	securityMap map[string]moex.SecurityInfo
 }
 
+// RunStats содержит статистику выполнения сервиса.
+type RunStats struct {
+	Existing int
+	Created  int
+}
+
 // NewService настраивает соединения и возвращает готовый сервис.
 func NewService(ctx context.Context, cfg config.Config) (*Service, error) {
 	if cfg.DatabaseURL == "" {
@@ -71,28 +77,35 @@ func (s *Service) Close() error {
 }
 
 // Run запускает процесс заполнения таблицы ticker.
-func (s *Service) Run(ctx context.Context) error {
+func (s *Service) Run(ctx context.Context) (RunStats, error) {
+	var stats RunStats
+
 	loc, err := time.LoadLocation("Europe/Moscow")
 	if err != nil {
-		return fmt.Errorf("load moscow location: %w", err)
+		return stats, fmt.Errorf("load moscow location: %w", err)
 	}
 
 	today := time.Now().In(loc)
 	startDate := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -1)
 
 	for _, tickerCfg := range s.cfg.MOEXTickers {
-		if err := s.processTicker(ctx, tickerCfg, startDate); err != nil {
+		tickerStats, err := s.processTicker(ctx, tickerCfg, startDate)
+		stats.Existing += tickerStats.Existing
+		stats.Created += tickerStats.Created
+		if err != nil {
 			log.Printf("ticker %s: %v", tickerCfg.Ticker, err)
 		}
 	}
 
-	return nil
+	return stats, nil
 }
 
-func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker, startDate time.Time) error {
+func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker, startDate time.Time) (RunStats, error) {
+	var stats RunStats
+
 	securityInfo, err := s.securityInfo(ctx, tickerCfg)
 	if err != nil {
-		return fmt.Errorf("security info: %w", err)
+		return stats, fmt.Errorf("security info: %w", err)
 	}
 
 	date := startDate
@@ -102,19 +115,20 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 	for tradingSessionsFound < sessionsTarget {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return stats, ctx.Err()
 		default:
 		}
 
 		historyRow, err := s.moexClient.GetHistoryRow(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
 		if err != nil {
-			return fmt.Errorf("get history row: %w", err)
+			return stats, fmt.Errorf("get history row: %w", err)
 		}
 
 		sessionActive := historyRow != nil && historyRow.Volume > 0
 
 		_, err = s.repo.GetByDateAndName(ctx, tickerCfg.Ticker, date)
 		if err == nil {
+			stats.Existing++
 			if sessionActive {
 				tradingSessionsFound++
 			}
@@ -123,7 +137,7 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 			continue
 		}
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return err
+			return stats, err
 		}
 
 		if !sessionActive {
@@ -136,8 +150,9 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 					BoardID:              tickerCfg.BoardID,
 				}
 				if err := s.repo.Insert(ctx, entity); err != nil {
-					return err
+					return stats, err
 				}
+				stats.Created++
 			}
 			date = date.AddDate(0, 0, -1)
 			continue
@@ -165,13 +180,14 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 		}
 
 		if err := s.repo.Insert(ctx, entity); err != nil {
-			return err
+			return stats, err
 		}
+		stats.Created++
 
 		date = date.AddDate(0, 0, -1)
 	}
 
-	return nil
+	return stats, nil
 }
 
 type sessionMetrics struct {

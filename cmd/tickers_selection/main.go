@@ -36,7 +36,7 @@ func main() {
 	}
 	defer service.Close()
 
-	if err := service.Run(ctx); err != nil {
+	if _, err := service.Run(ctx); err != nil {
 		log.Fatalf("ошибка выполнения tickers_filling: %v", err)
 	}
 }
