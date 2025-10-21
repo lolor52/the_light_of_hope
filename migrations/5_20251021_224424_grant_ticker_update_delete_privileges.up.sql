@@ -6,19 +6,7 @@ BEGIN
         RAISE NOTICE 'Role % does not exist; skipping grants.', 'invest_intraday_app';
     ELSE
         EXECUTE 'GRANT UPDATE, DELETE ON TABLE ticker TO invest_intraday_app';
-        EXECUTE $$GRANT UPDATE (
-    trading_session_date,
-    trading_session_active,
-    ticker_name,
-    secid,
-    boardid,
-    vwap,
-    val,
-    vah,
-    liquidity,
-    volatility,
-    flat_trend_filter
-) ON TABLE ticker TO invest_intraday_app$$;
+        EXECUTE 'GRANT UPDATE (trading_session_date, trading_session_active, ticker_name, secid, boardid, vwap, val, vah, liquidity, volatility, flat_trend_filter) ON TABLE ticker TO invest_intraday_app';
     END IF;
 END;
 $$;
