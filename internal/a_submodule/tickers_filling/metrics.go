@@ -16,6 +16,24 @@ const (
 	valueAreaCoverageRatio = 0.7
 )
 
+type flatTrendComponents struct {
+	OverlapPercent float64
+	SlopeAbs       float64
+	SkewPercent    float64
+}
+
+type volatilityComponents struct {
+	ATRPercent     float64
+	RelativeVolume float64
+}
+
+type liquidityComponents struct {
+	SpreadRelativePercent float64
+	TurnoverPerMinute     float64
+	DepthTopFive          float64
+	TickPercent           float64
+}
+
 func calculateVWAP(candles []moex.MinuteCandle) (float64, error) {
 	var totalValue, totalVolume float64
 	for _, candle := range candles {
@@ -135,9 +153,9 @@ func calculateValueArea(candles []moex.MinuteCandle, minStep float64) (valueArea
 	return result, nil
 }
 
-func calculateFlatTrendFilter(candles []moex.MinuteCandle, current, prev moex.HistoryRow) (float64, error) {
+func calculateFlatTrendComponents(candles []moex.MinuteCandle, current, prev moex.HistoryRow) (flatTrendComponents, error) {
 	if len(candles) == 0 {
-		return 0, errors.New("empty candles for flat trend filter")
+		return flatTrendComponents{}, errors.New("empty candles for flat trend filter")
 	}
 
 	cumulativeValue := make([]float64, len(candles))
@@ -154,12 +172,10 @@ func calculateFlatTrendFilter(candles []moex.MinuteCandle, current, prev moex.Hi
 	lastIndex := len(candles) - 1
 	vwapLast := cumulativeValue[lastIndex] / (cumulativeVolume[lastIndex] + epsilon)
 	k := vwapSlopeWindow
-	var slope float64
+	slopeAbs := 0.0
 	if lastIndex-k >= 0 {
 		vwapPrev := cumulativeValue[lastIndex-k] / (cumulativeVolume[lastIndex-k] + epsilon)
-		if vwapPrev != 0 {
-			slope = (vwapLast - vwapPrev) / (vwapPrev + epsilon) * 100
-		}
+		slopeAbs = math.Abs((vwapLast - vwapPrev) / (vwapPrev + epsilon) * 100)
 	}
 
 	overlapWidth := math.Max(0, math.Min(current.High, prev.High)-math.Max(current.Low, prev.Low))
@@ -177,89 +193,102 @@ func calculateFlatTrendFilter(candles []moex.MinuteCandle, current, prev moex.Hi
 		skewPercent = math.Abs(vwapDay-mid) / (rangeWidth + epsilon) * 100
 	}
 
-	overlapNorm := clamp(overlapPercent/100, 0, 1)
-	slopeNorm := clamp(math.Abs(slope)/10, 0, 1)
-	skewNorm := clamp(skewPercent/100, 0, 1)
-
-	filter := 100 * (0.5*overlapNorm + 0.3*(1-slopeNorm) + 0.2*(1-skewNorm))
-
-	return filter, nil
+	return flatTrendComponents{
+		OverlapPercent: overlapPercent,
+		SlopeAbs:       slopeAbs,
+		SkewPercent:    skewPercent,
+	}, nil
 }
 
-func calculateVolatility(currentDate moex.HistoryRow, history []moex.HistoryRow) (float64, error) {
+func calculateVolatilityComponents(currentDay moex.HistoryRow, candles []moex.MinuteCandle, history []moex.HistoryRow) (volatilityComponents, error) {
+	if len(candles) == 0 {
+		return volatilityComponents{}, errors.New("empty candles for volatility")
+	}
 	if len(history) == 0 {
-		return 0, errors.New("empty history for volatility")
+		return volatilityComponents{}, errors.New("empty history for volatility")
 	}
 
 	sort.Slice(history, func(i, j int) bool {
 		return history[i].TradeDate.Before(history[j].TradeDate)
 	})
 
-	// Составим TR по истории.
-	trueRanges := make([]float64, len(history))
-	for i, row := range history {
-		prevClose := row.Close
-		if i > 0 {
-			prevClose = history[i-1].Close
-		}
-		rangeHighLow := row.High - row.Low
-		rangeHighPrev := math.Abs(row.High - prevClose)
-		rangeLowPrev := math.Abs(row.Low - prevClose)
-		trueRanges[i] = math.Max(rangeHighLow, math.Max(rangeHighPrev, rangeLowPrev))
-	}
+	trueRanges := make([]float64, 0, len(candles))
+	prevClose := candles[0].Open
 
-	// Найдём индекс текущей даты.
-	currentIndex := -1
-	for i, row := range history {
-		if row.TradeDate.Equal(currentDate.TradeDate) {
-			currentIndex = i
+	// Попробуем заменить начальное значение на закрытие предыдущего дня, если оно есть в истории.
+	for i := len(history) - 1; i >= 0; i-- {
+		row := history[i]
+		if row.TradeDate.Before(currentDay.TradeDate) {
+			prevClose = row.Close
 			break
 		}
 	}
-	if currentIndex == -1 {
-		return 0, errors.New("current date not found in history for volatility")
+
+	for _, candle := range candles {
+		rangeHighLow := candle.High - candle.Low
+		rangeHighPrev := math.Abs(candle.High - prevClose)
+		rangeLowPrev := math.Abs(candle.Low - prevClose)
+		trueRanges = append(trueRanges, math.Max(rangeHighLow, math.Max(rangeHighPrev, rangeLowPrev)))
+		prevClose = candle.Close
 	}
 
-	start := currentIndex - atrPeriod + 1
-	if start < 0 {
-		start = 0
+	period := atrPeriod
+	if len(trueRanges) < period {
+		period = len(trueRanges)
 	}
-	var sumATR float64
-	for i := start; i <= currentIndex; i++ {
-		sumATR += trueRanges[i]
+	if period == 0 {
+		return volatilityComponents{}, errors.New("not enough data for ATR")
 	}
-	atr := sumATR / float64(currentIndex-start+1)
+
+	var atrSum float64
+	for _, value := range trueRanges[len(trueRanges)-period:] {
+		atrSum += value
+	}
+	atr := atrSum / float64(period)
+
+	closePrice := candles[len(candles)-1].Close
+	if closePrice <= 0 {
+		closePrice = currentDay.Close
+	}
 
 	atrPercent := 0.0
-	if currentDate.Close > 0 {
-		atrPercent = atr / (currentDate.Close + epsilon) * 100
+	if closePrice > 0 {
+		atrPercent = atr / (closePrice + epsilon) * 100
 	}
 
-	startVol := currentIndex - relativeVolumePeriod + 1
-	if startVol < 0 {
-		startVol = 0
+	volumes := make([]float64, 0, len(history))
+	for _, row := range history {
+		if row.TradeDate.Before(currentDay.TradeDate) {
+			volumes = append(volumes, row.Volume)
+		}
 	}
-	var sumVolume float64
-	for i := startVol; i <= currentIndex; i++ {
-		sumVolume += history[i].Volume
+
+	if len(volumes) > relativeVolumePeriod {
+		volumes = volumes[len(volumes)-relativeVolumePeriod:]
 	}
-	avgVolume := sumVolume / float64(currentIndex-startVol+1)
+
+	var avgVolume float64
+	if len(volumes) > 0 {
+		for _, volume := range volumes {
+			avgVolume += volume
+		}
+		avgVolume /= float64(len(volumes))
+	}
+
 	rvol := 0.0
 	if avgVolume > 0 {
-		rvol = currentDate.Volume / avgVolume
+		rvol = currentDay.Volume / avgVolume
 	}
 
-	atrNorm := clamp(atrPercent/15, 0, 1)
-	rvolNorm := clamp(rvol/3, 0, 1)
-
-	volatility := 100 * (0.6*atrNorm + 0.4*rvolNorm)
-
-	return volatility, nil
+	return volatilityComponents{
+		ATRPercent:     atrPercent,
+		RelativeVolume: rvol,
+	}, nil
 }
 
-func calculateLiquidity(candles []moex.MinuteCandle, marketData moex.MarketData, book moex.OrderBook, info moex.SecurityInfo) (float64, error) {
+func calculateLiquidityComponents(candles []moex.MinuteCandle, marketData moex.MarketData, book moex.OrderBook, info moex.SecurityInfo) (liquidityComponents, error) {
 	if len(candles) == 0 {
-		return 0, errors.New("empty candles for liquidity")
+		return liquidityComponents{}, errors.New("empty candles for liquidity")
 	}
 
 	mid := (marketData.Bid + marketData.Offer) / 2
@@ -267,7 +296,7 @@ func calculateLiquidity(candles []moex.MinuteCandle, marketData moex.MarketData,
 		mid = marketData.Last
 	}
 	if mid <= 0 {
-		return 0, errors.New("invalid mid price for liquidity")
+		return liquidityComponents{}, errors.New("invalid mid price for liquidity")
 	}
 
 	spreadAbs := marketData.Offer - marketData.Bid
@@ -301,22 +330,10 @@ func calculateLiquidity(candles []moex.MinuteCandle, marketData moex.MarketData,
 		tickPercent = info.MinStep / (mid + epsilon) * 100
 	}
 
-	spreadComponent := 1 - clamp(spreadRel/1, 0, 1)
-	turnoverComponent := clamp(turnoverPerMinute/5e7, 0, 1)
-	depthComponent := clamp(depthTotal/1e7, 0, 1)
-	tickComponent := 1 - clamp(tickPercent/0.5, 0, 1)
-
-	liquidity := 100 * (0.35*spreadComponent + 0.35*turnoverComponent + 0.25*depthComponent + 0.05*tickComponent)
-
-	return liquidity, nil
-}
-
-func clamp(value, min, max float64) float64 {
-	if value < min {
-		return min
-	}
-	if value > max {
-		return max
-	}
-	return value
+	return liquidityComponents{
+		SpreadRelativePercent: spreadRel,
+		TurnoverPerMinute:     turnoverPerMinute,
+		DepthTopFive:          depthTotal,
+		TickPercent:           tickPercent,
+	}, nil
 }
