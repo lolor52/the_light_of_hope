@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
+	"invest_intraday/internal/a_submodule/tickers_filling"
 	"invest_intraday/internal/a_technical/config"
-	"invest_intraday/internal/tickers_selection"
 )
 
 func main() {
@@ -30,13 +30,13 @@ func main() {
 	ctx, cancelTimeout := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancelTimeout()
 
-	service, err := tickers_selection.NewService(ctx, cfg)
+	service, err := tickers_filling.NewService(ctx, cfg)
 	if err != nil {
 		log.Fatalf("инициализация сервиса: %v", err)
 	}
 	defer service.Close()
 
 	if err := service.Run(ctx); err != nil {
-		log.Fatalf("ошибка выполнения tickers_selection: %v", err)
+		log.Fatalf("ошибка выполнения tickers_filling: %v", err)
 	}
 }
