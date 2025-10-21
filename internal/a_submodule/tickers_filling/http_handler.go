@@ -37,12 +37,16 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer service.Close()
 
-	if err := service.Run(ctx); err != nil {
+	stats, err := service.Run(ctx)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]int{
+		"existing_records": stats.Existing,
+		"created_records":  stats.Created,
+	})
 }
 
 func writeError(w http.ResponseWriter, status int, err error) {
