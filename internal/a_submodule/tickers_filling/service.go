@@ -79,7 +79,6 @@ func (s *Service) Close() error {
 // Run запускает процесс заполнения таблицы ticker.
 func (s *Service) Run(ctx context.Context) (RunStats, error) {
 	var stats RunStats
-	var pending []pendingRecord
 
 	loc, err := time.LoadLocation("Europe/Moscow")
 	if err != nil {
@@ -93,36 +92,26 @@ func (s *Service) Run(ctx context.Context) (RunStats, error) {
 
 	for _, tickerCfg := range s.cfg.MOEXTickers {
 		log.Printf("tickers_filling: обработка тикера %s (торговая площадка %s, идентификатор %s)", tickerCfg.Ticker, tickerCfg.BoardID, tickerCfg.SecID)
-		tickerStats, tickerPending, err := s.processTicker(ctx, tickerCfg, startDate)
+		tickerStats, err := s.processTicker(ctx, tickerCfg, startDate)
 		stats.Existing += tickerStats.Existing
 		stats.Created += tickerStats.Created
 		if err != nil {
 			log.Printf("tickers_filling: ошибка при обработке тикера %s: %v", tickerCfg.Ticker, err)
 			continue
 		}
-		pending = append(pending, tickerPending...)
 		log.Printf("tickers_filling: тикер %s обработан, найдено %d существующих записей, создано %d новых", tickerCfg.Ticker, tickerStats.Existing, tickerStats.Created)
-	}
-
-	if len(pending) > 0 {
-		created, err := s.finalizeAndInsertPending(ctx, pending)
-		if err != nil {
-			return stats, err
-		}
-		stats.Created += created
 	}
 
 	log.Printf("tickers_filling: обработка завершена, всего существующих записей %d, создано %d", stats.Existing, stats.Created)
 	return stats, nil
 }
 
-func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker, startDate time.Time) (RunStats, []pendingRecord, error) {
+func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker, startDate time.Time) (RunStats, error) {
 	var stats RunStats
-	var pending []pendingRecord
 
 	securityInfo, err := s.securityInfo(ctx, tickerCfg)
 	if err != nil {
-		return stats, nil, fmt.Errorf("security info: %w", err)
+		return stats, fmt.Errorf("security info: %w", err)
 	}
 
 	log.Printf("tickers_filling: загружена справочная информация по тикеру %s", tickerCfg.Ticker)
@@ -134,13 +123,13 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 	for tradingSessionsFound < sessionsTarget {
 		select {
 		case <-ctx.Done():
-			return stats, nil, ctx.Err()
+			return stats, ctx.Err()
 		default:
 		}
 
 		historyRow, err := s.moexClient.GetHistoryRow(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
 		if err != nil {
-			return stats, nil, fmt.Errorf("get history row: %w", err)
+			return stats, fmt.Errorf("get history row: %w", err)
 		}
 
 		sessionActive := historyRow != nil && historyRow.Volume > 0
@@ -169,7 +158,7 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 			continue
 		}
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return stats, nil, err
+			return stats, err
 		}
 
 		if !sessionActive {
@@ -182,7 +171,7 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 					BoardID:              tickerCfg.BoardID,
 				}
 				if err := s.repo.Insert(ctx, entity); err != nil {
-					return stats, nil, err
+					return stats, err
 				}
 				stats.Created++
 				log.Printf("tickers_filling: создана запись для неактивной сессии %s %s", tickerCfg.Ticker, date.Format("2006-01-02"))
@@ -208,33 +197,34 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 			VWAP:                 metrics.VWAP,
 			VAL:                  metrics.VAL,
 			VAH:                  metrics.VAH,
+			FlatTrendFilter:      metrics.FlatTrendFilter,
+			Volatility:           metrics.Volatility,
+			Liquidity:            metrics.Liquidity,
 		}
 
-		pending = append(pending, pendingRecord{entity: entity, raw: metrics})
-		log.Printf("tickers_filling: подготовлена запись для активной сессии %s %s", tickerCfg.Ticker, date.Format("2006-01-02"))
+		if err := s.repo.Insert(ctx, entity); err != nil {
+			return stats, err
+		}
+		stats.Created++
+		log.Printf("tickers_filling: создана запись для активной сессии %s %s", tickerCfg.Ticker, date.Format("2006-01-02"))
 
 		date = date.AddDate(0, 0, -1)
 	}
 
-	return stats, pending, nil
+	return stats, nil
 }
 
-type sessionRawMetrics struct {
-	VWAP       *string
-	VAL        *string
-	VAH        *string
-	FlatTrend  *flatTrendComponents
-	Volatility *volatilityComponents
-	Liquidity  *liquidityComponents
+type sessionMetrics struct {
+	VWAP            *string
+	VAL             *string
+	VAH             *string
+	FlatTrendFilter *string
+	Volatility      *string
+	Liquidity       *string
 }
 
-type pendingRecord struct {
-	entity models.Ticker
-	raw    sessionRawMetrics
-}
-
-func (s *Service) collectMetrics(ctx context.Context, tickerCfg config.MOEXTicker, securityInfo moex.SecurityInfo, historyRow moex.HistoryRow) (sessionRawMetrics, error) {
-	metrics := sessionRawMetrics{}
+func (s *Service) collectMetrics(ctx context.Context, tickerCfg config.MOEXTicker, securityInfo moex.SecurityInfo, historyRow moex.HistoryRow) (sessionMetrics, error) {
+	metrics := sessionMetrics{}
 
 	candles, err := s.moexClient.GetMinuteCandles(ctx, tickerCfg.BoardID, tickerCfg.SecID, historyRow.TradeDate)
 	if err != nil {
@@ -254,17 +244,17 @@ func (s *Service) collectMetrics(ctx context.Context, tickerCfg config.MOEXTicke
 
 	prevRow, err := s.prevTradingDay(ctx, tickerCfg, historyRow.TradeDate)
 	if err == nil && prevRow != nil {
-		filterValue, err := calculateFlatTrendComponents(candles, historyRow, *prevRow)
+		filterValue, err := calculateFlatTrendFilter(candles, historyRow, *prevRow)
 		if err == nil {
-			metrics.FlatTrend = &filterValue
+			metrics.FlatTrendFilter = formatFloat(filterValue)
 		}
 	}
 
 	historyWindow, err := s.moexClient.GetHistoryWindow(ctx, tickerCfg.BoardID, tickerCfg.SecID, historyRow.TradeDate.AddDate(0, 0, -60), historyRow.TradeDate)
 	if err == nil && len(historyWindow) > 0 {
-		volValue, err := calculateVolatilityComponents(historyRow, historyWindow)
+		volValue, err := calculateVolatility(historyRow, historyWindow)
 		if err == nil {
-			metrics.Volatility = &volValue
+			metrics.Volatility = formatFloat(volValue)
 		}
 	}
 
@@ -272,181 +262,14 @@ func (s *Service) collectMetrics(ctx context.Context, tickerCfg config.MOEXTicke
 	if err == nil {
 		orderBook, err := s.moexClient.GetOrderBook(ctx, tickerCfg.BoardID, tickerCfg.SecID, historyRow.TradeDate, 5)
 		if err == nil {
-			liquidityValue, err := calculateLiquidityComponents(candles, marketData, orderBook, securityInfo)
+			liquidityValue, err := calculateLiquidity(candles, marketData, orderBook, securityInfo)
 			if err == nil {
-				metrics.Liquidity = &liquidityValue
+				metrics.Liquidity = formatFloat(liquidityValue)
 			}
 		}
 	}
 
 	return metrics, nil
-}
-
-func (s *Service) finalizeAndInsertPending(ctx context.Context, pending []pendingRecord) (int, error) {
-	grouped := make(map[time.Time][]*pendingRecord)
-	for i := range pending {
-		record := &pending[i]
-		grouped[record.entity.TradingSessionDate] = append(grouped[record.entity.TradingSessionDate], record)
-	}
-
-	for _, records := range grouped {
-		applyFlatTrendNormalization(records)
-		applyVolatilityNormalization(records)
-		applyLiquidityNormalization(records)
-	}
-
-	created := 0
-	for i := range pending {
-		if err := s.repo.Insert(ctx, pending[i].entity); err != nil {
-			return created, err
-		}
-		log.Printf("tickers_filling: создана запись для активной сессии %s %s", pending[i].entity.TickerName, pending[i].entity.TradingSessionDate.Format("2006-01-02"))
-		created++
-	}
-
-	return created, nil
-}
-
-func applyFlatTrendNormalization(records []*pendingRecord) {
-	type item struct {
-		rec *pendingRecord
-		cmp *flatTrendComponents
-	}
-
-	var items []item
-	for _, record := range records {
-		if record.raw.FlatTrend == nil {
-			continue
-		}
-		items = append(items, item{rec: record, cmp: record.raw.FlatTrend})
-	}
-	if len(items) == 0 {
-		return
-	}
-
-	overlaps := make([]float64, len(items))
-	slopes := make([]float64, len(items))
-	skews := make([]float64, len(items))
-	for i, it := range items {
-		overlaps[i] = it.cmp.OverlapPercent
-		slopes[i] = it.cmp.SlopeAbs
-		skews[i] = it.cmp.SkewPercent
-	}
-
-	overlapMin, overlapMax := minMax(overlaps)
-	slopeMin, slopeMax := minMax(slopes)
-	skewMin, skewMax := minMax(skews)
-
-	for i, it := range items {
-		overlapNorm := normUp(overlaps[i], overlapMin, overlapMax)
-		slopeNorm := normDown(slopes[i], slopeMin, slopeMax)
-		skewNorm := normDown(skews[i], skewMin, skewMax)
-		value := 100 * (0.5*overlapNorm + 0.3*slopeNorm + 0.2*skewNorm)
-		it.rec.entity.FlatTrendFilter = formatFloat(value)
-	}
-}
-
-func applyVolatilityNormalization(records []*pendingRecord) {
-	type item struct {
-		rec *pendingRecord
-		cmp *volatilityComponents
-	}
-
-	var items []item
-	for _, record := range records {
-		if record.raw.Volatility == nil {
-			continue
-		}
-		items = append(items, item{rec: record, cmp: record.raw.Volatility})
-	}
-	if len(items) == 0 {
-		return
-	}
-
-	atrValues := make([]float64, len(items))
-	rvolValues := make([]float64, len(items))
-	for i, it := range items {
-		atrValues[i] = it.cmp.ATRPercent
-		rvolValues[i] = it.cmp.RelativeVolume
-	}
-
-	atrMin, atrMax := minMax(atrValues)
-	rvolMin, rvolMax := minMax(rvolValues)
-
-	for i, it := range items {
-		atrNorm := normUp(atrValues[i], atrMin, atrMax)
-		rvolNorm := normUp(rvolValues[i], rvolMin, rvolMax)
-		value := 100 * (0.6*atrNorm + 0.4*rvolNorm)
-		it.rec.entity.Volatility = formatFloat(value)
-	}
-}
-
-func applyLiquidityNormalization(records []*pendingRecord) {
-	type item struct {
-		rec *pendingRecord
-		cmp *liquidityComponents
-	}
-
-	var items []item
-	for _, record := range records {
-		if record.raw.Liquidity == nil {
-			continue
-		}
-		items = append(items, item{rec: record, cmp: record.raw.Liquidity})
-	}
-	if len(items) == 0 {
-		return
-	}
-
-	spreadValues := make([]float64, len(items))
-	turnoverValues := make([]float64, len(items))
-	depthValues := make([]float64, len(items))
-	tickValues := make([]float64, len(items))
-	for i, it := range items {
-		spreadValues[i] = it.cmp.SpreadRelativePercent
-		turnoverValues[i] = it.cmp.TurnoverPerMinute
-		depthValues[i] = it.cmp.DepthTopFive
-		tickValues[i] = it.cmp.TickPercent
-	}
-
-	spreadMin, spreadMax := minMax(spreadValues)
-	turnoverMin, turnoverMax := minMax(turnoverValues)
-	depthMin, depthMax := minMax(depthValues)
-	tickMin, tickMax := minMax(tickValues)
-
-	for i, it := range items {
-		spreadComponent := normDown(spreadValues[i], spreadMin, spreadMax)
-		turnoverComponent := normUp(turnoverValues[i], turnoverMin, turnoverMax)
-		depthComponent := normUp(depthValues[i], depthMin, depthMax)
-		tickComponent := normDown(tickValues[i], tickMin, tickMax)
-		value := 100 * (0.35*spreadComponent + 0.35*turnoverComponent + 0.25*depthComponent + 0.05*tickComponent)
-		it.rec.entity.Liquidity = formatFloat(value)
-	}
-}
-
-func minMax(values []float64) (float64, float64) {
-	if len(values) == 0 {
-		return 0, 0
-	}
-	minVal := values[0]
-	maxVal := values[0]
-	for _, v := range values[1:] {
-		if v < minVal {
-			minVal = v
-		}
-		if v > maxVal {
-			maxVal = v
-		}
-	}
-	return minVal, maxVal
-}
-
-func normUp(value, minVal, maxVal float64) float64 {
-	return (value - minVal) / (maxVal - minVal + epsilon)
-}
-
-func normDown(value, minVal, maxVal float64) float64 {
-	return 1 - normUp(value, minVal, maxVal)
 }
 
 func (s *Service) securityInfo(ctx context.Context, tickerCfg config.MOEXTicker) (moex.SecurityInfo, error) {
