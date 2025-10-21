@@ -54,6 +54,7 @@ func Authenticate(ctx context.Context, login, password string) (*Session, error)
 		return nil, fmt.Errorf("create auth request: %w", err)
 	}
 	req.SetBasicAuth(login, password)
+	req.Header.Set("Accept", "application/json")
 
 	query := req.URL.Query()
 	query.Set(langQueryParam, langValue)
@@ -69,14 +70,6 @@ func Authenticate(ctx context.Context, login, password string) (*Session, error)
 		return nil, fmt.Errorf("passport auth unexpected status: %s", resp.Status)
 	}
 
-	marker := resp.Header.Get(markerHeader)
-	if marker == "" {
-		return nil, errors.New("passport auth marker header is missing")
-	}
-	if !strings.EqualFold(marker, grantedMarker) {
-		return nil, fmt.Errorf("passport auth marker is not granted: %s", marker)
-	}
-
 	var payload struct {
 		Success bool   `json:"success"`
 		Error   string `json:"error"`
@@ -89,6 +82,11 @@ func Authenticate(ctx context.Context, login, password string) (*Session, error)
 			payload.Error = "unknown passport error"
 		}
 		return nil, errors.New(payload.Error)
+	}
+
+	marker := resp.Header.Get(markerHeader)
+	if marker != "" && !strings.EqualFold(marker, grantedMarker) {
+		return nil, fmt.Errorf("passport auth marker is not granted: %s", marker)
 	}
 
 	requestURL := resp.Request.URL
