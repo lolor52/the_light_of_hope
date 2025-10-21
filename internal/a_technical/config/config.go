@@ -24,6 +24,7 @@ type Config struct {
 	MOEXPassport           PassportCredentials `json:"moex_passport"`
 	MOEXTickers            []MOEXTicker        `json:"moex_tickers_secid_boardid"`
 	DatabaseURL            string              `json:"DATABASE_URL"`
+	AlorToken              string              `json:"alor_token"`
 	TickersFillingSessions int                 `json:"tickers_filling_sessions"`
 }
 
