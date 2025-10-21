@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -54,6 +55,7 @@ func Authenticate(ctx context.Context, login, password string) (*Session, error)
 		return nil, fmt.Errorf("create auth request: %w", err)
 	}
 	req.SetBasicAuth(login, password)
+	req.Header.Set("Accept", "application/json")
 
 	query := req.URL.Query()
 	query.Set(langQueryParam, langValue)
@@ -61,19 +63,21 @@ func Authenticate(ctx context.Context, login, password string) (*Session, error)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		log.Printf("passport auth request failed: %v", err)
 		return nil, fmt.Errorf("passport auth request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("passport auth unexpected status: %s", resp.Status)
 		return nil, fmt.Errorf("passport auth unexpected status: %s", resp.Status)
 	}
 
 	marker := resp.Header.Get(markerHeader)
 	if marker == "" {
-		return nil, errors.New("passport auth marker header is missing")
-	}
-	if !strings.EqualFold(marker, grantedMarker) {
+		log.Printf("passport auth marker header %s is missing", markerHeader)
+	} else if !strings.EqualFold(marker, grantedMarker) {
+		log.Printf("passport auth marker is not granted: %s", marker)
 		return nil, fmt.Errorf("passport auth marker is not granted: %s", marker)
 	}
 
@@ -82,12 +86,14 @@ func Authenticate(ctx context.Context, login, password string) (*Session, error)
 		Error   string `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		log.Printf("decode passport auth response failed: %v", err)
 		return nil, fmt.Errorf("decode passport auth response: %w", err)
 	}
 	if !payload.Success {
 		if payload.Error == "" {
 			payload.Error = "unknown passport error"
 		}
+		log.Printf("passport auth failed: %s", payload.Error)
 		return nil, errors.New(payload.Error)
 	}
 
@@ -108,6 +114,7 @@ func Authenticate(ctx context.Context, login, password string) (*Session, error)
 		}
 	}
 	if !cookieFound {
+		log.Print("passport auth cookie MicexPassportCert not received")
 		return nil, errors.New("passport auth cookie MicexPassportCert not received")
 	}
 
