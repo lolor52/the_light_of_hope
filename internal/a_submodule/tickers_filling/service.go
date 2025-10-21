@@ -1,4 +1,4 @@
-package tickers_selection
+package tickers_filling
 
 import (
 	"context"
