@@ -2,8 +2,10 @@ package models
 
 import "time"
 
-// Ticker описывает агрегированные метрики торговой сессии конкретного тикера.
-type Ticker struct {
+// TickerHistory описывает агрегированные метрики торговой сессии конкретного тикера.
+type TickerHistory struct {
+	// ID хранит первичный ключ записи в таблице ticker_history.
+	ID int64 `db:"id"`
 	// TradingSessionDate определяет календарный день, к которому относятся сохранённые показатели.
 	TradingSessionDate time.Time `db:"trading_session_date"`
 	// TradingSessionActive хранит флаг о том, открыта ли сессия, чтобы интерпретировать неполные данные.
