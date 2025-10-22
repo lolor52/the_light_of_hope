@@ -6,8 +6,8 @@ import "time"
 type OrderPrice struct {
 	// ID хранит первичный ключ записи в таблице order_price.
 	ID int64 `db:"id"`
-	// TickerID содержит идентификатор связанного тикера.
-	TickerID int64 `db:"tickers_id"`
+	// TickerInfoID содержит идентификатор записи в справочнике ticker_info.
+	TickerInfoID int64 `db:"ticker_info_id"`
 	// PriceLong фиксирует цену входа в длинную позицию.
 	PriceLong float64 `db:"price_long"`
 	// PriceShort фиксирует цену входа в короткую позицию.
