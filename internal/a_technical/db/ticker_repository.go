@@ -26,21 +26,20 @@ var ErrNotFound = errors.New("ticker_history entry not found")
 // GetByDateAndName ищет запись по имени тикера и дате торговой сессии.
 func (r *TickerRepository) GetByDateAndName(ctx context.Context, name string, sessionDate time.Time) (models.TickerHistory, error) {
 	const query = `
-SELECT id,
-       trading_session_date,
-       trading_session_active,
-       ticker_name,
-       secid,
-       boardid,
-       vwap,
-       val,
-       vah,
-       liquidity,
-       volatility,
-       flat_trend_filter
-  FROM ticker_history
- WHERE ticker_name = $1
-   AND trading_session_date = $2
+SELECT th.id,
+       th.trading_session_date,
+       th.trading_session_active,
+       th.ticker_info_id,
+       th.vwap,
+       th.val,
+       th.vah,
+       th.liquidity,
+       th.volatility,
+       th.flat_trend_filter
+  FROM ticker_history th
+  JOIN ticker_info ti ON ti.id = th.ticker_info_id
+ WHERE ti.ticker_name = $1
+   AND th.trading_session_date = $2
 `
 
 	var entity models.TickerHistory
@@ -48,9 +47,7 @@ SELECT id,
 		&entity.ID,
 		&entity.TradingSessionDate,
 		&entity.TradingSessionActive,
-		&entity.TickerName,
-		&entity.SecID,
-		&entity.BoardID,
+		&entity.TickerInfoID,
 		&entity.VWAP,
 		&entity.VAL,
 		&entity.VAH,
@@ -74,24 +71,20 @@ func (r *TickerRepository) Insert(ctx context.Context, entity models.TickerHisto
 INSERT INTO ticker_history (
     trading_session_date,
     trading_session_active,
-    ticker_name,
-    secid,
-    boardid,
+    ticker_info_id,
     vwap,
     val,
     vah,
     liquidity,
     volatility,
     flat_trend_filter
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 `
 
 	_, err := r.db.ExecContext(ctx, query,
 		entity.TradingSessionDate,
 		entity.TradingSessionActive,
-		entity.TickerName,
-		entity.SecID,
-		entity.BoardID,
+		entity.TickerInfoID,
 		entity.VWAP,
 		entity.VAL,
 		entity.VAH,
@@ -113,22 +106,21 @@ func (r *TickerRepository) ListLastActiveSessions(ctx context.Context, name stri
 	}
 
 	const query = `
-SELECT id,
-       trading_session_date,
-       trading_session_active,
-       ticker_name,
-       secid,
-       boardid,
-       vwap,
-       val,
-       vah,
-       liquidity,
-       volatility,
-       flat_trend_filter
-  FROM ticker_history
- WHERE ticker_name = $1
-   AND trading_session_active = true
- ORDER BY trading_session_date DESC
+SELECT th.id,
+       th.trading_session_date,
+       th.trading_session_active,
+       th.ticker_info_id,
+       th.vwap,
+       th.val,
+       th.vah,
+       th.liquidity,
+       th.volatility,
+       th.flat_trend_filter
+  FROM ticker_history th
+  JOIN ticker_info ti ON ti.id = th.ticker_info_id
+ WHERE ti.ticker_name = $1
+   AND th.trading_session_active = true
+ ORDER BY th.trading_session_date DESC
  LIMIT $2
 `
 
@@ -145,9 +137,7 @@ SELECT id,
 			&entity.ID,
 			&entity.TradingSessionDate,
 			&entity.TradingSessionActive,
-			&entity.TickerName,
-			&entity.SecID,
-			&entity.BoardID,
+			&entity.TickerInfoID,
 			&entity.VWAP,
 			&entity.VAL,
 			&entity.VAH,
