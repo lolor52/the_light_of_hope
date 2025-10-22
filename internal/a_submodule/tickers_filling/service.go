@@ -237,7 +237,7 @@ type pendingRecord struct {
 func (s *Service) collectMetrics(ctx context.Context, tickerCfg models.TickerInfo, securityInfo moex.SecurityInfo, historyRow moex.HistoryRow) (sessionRawMetrics, error) {
 	metrics := sessionRawMetrics{}
 
-	intervals, err := s.moexClient.GetBoardSessions(ctx, tickerCfg.BoardID, tickerCfg.SecID, historyRow.TradeDate)
+	intervals, err := s.moexClient.GetBoardSessions(ctx, tickerCfg.BoardID, historyRow.TradeDate)
 	if err != nil {
 		return metrics, fmt.Errorf("load sessions: %w", err)
 	}
@@ -360,7 +360,7 @@ func (s *Service) loadHistoricalSeries(ctx context.Context, tickerCfg models.Tic
 }
 
 func (s *Service) loadSeriesForDate(ctx context.Context, tickerCfg models.TickerInfo, securityInfo moex.SecurityInfo, date time.Time, prevClose float64) (mainSessionSeries, float64, error) {
-	intervals, err := s.moexClient.GetBoardSessions(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
+	intervals, err := s.moexClient.GetBoardSessions(ctx, tickerCfg.BoardID, date)
 	if err != nil {
 		return mainSessionSeries{}, 0, err
 	}
