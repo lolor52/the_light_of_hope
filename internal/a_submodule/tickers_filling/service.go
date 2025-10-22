@@ -180,9 +180,7 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 				entity := models.TickerHistory{
 					TradingSessionDate:   date,
 					TradingSessionActive: false,
-					TickerName:           tickerCfg.TickerName,
-					SecID:                tickerCfg.SecID,
-					BoardID:              tickerCfg.BoardID,
+					TickerInfoID:         tickerCfg.ID,
 				}
 				if insertErr := s.repo.Insert(ctx, entity); insertErr != nil {
 					return stats, nil, insertErr
@@ -207,9 +205,7 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 		entity := models.TickerHistory{
 			TradingSessionDate:   date,
 			TradingSessionActive: true,
-			TickerName:           tickerCfg.TickerName,
-			SecID:                tickerCfg.SecID,
-			BoardID:              tickerCfg.BoardID,
+			TickerInfoID:         tickerCfg.ID,
 			VWAP:                 metrics.VWAP,
 			VAL:                  metrics.VAL,
 			VAH:                  metrics.VAH,
