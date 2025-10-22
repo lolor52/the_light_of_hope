@@ -149,26 +149,6 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 		default:
 		}
 
-		historyEntity, err := s.repo.GetByDateAndName(ctx, tickerCfg.TickerName, date)
-		if err == nil {
-			stats.Existing++
-			if historyEntity.TradingSessionActive {
-				tradingSessionsFound++
-				consecutiveInactiveDays = 0
-			} else if maxInactiveDays > 0 {
-				consecutiveInactiveDays++
-				if consecutiveInactiveDays >= maxInactiveDays {
-					log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.TickerName, maxInactiveDays)
-					return stats, pending, nil
-				}
-			}
-			date = date.AddDate(0, 0, -1)
-			continue
-		}
-		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return stats, nil, err
-		}
-
 		historyRow, err := s.moexClient.GetHistoryRow(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
 		if err != nil {
 			return stats, nil, fmt.Errorf("get history row: %w", err)
@@ -176,31 +156,51 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 
 		sessionActive := historyRow != nil && historyRow.Volume > 0
 
+		if sessionActive {
+			consecutiveInactiveDays = 0
+		} else if maxInactiveDays > 0 {
+			consecutiveInactiveDays++
+		}
+
+		_, err = s.repo.GetByDateAndName(ctx, tickerCfg.TickerName, date)
+		if err == nil {
+			stats.Existing++
+			if sessionActive {
+				tradingSessionsFound++
+			}
+			if !sessionActive && maxInactiveDays > 0 && consecutiveInactiveDays >= maxInactiveDays {
+				log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.TickerName, maxInactiveDays)
+				return stats, pending, nil
+			}
+			// запись уже есть, перейдём к следующей дате
+			date = date.AddDate(0, 0, -1)
+			continue
+		}
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return stats, nil, err
+		}
+
 		if !sessionActive {
-			if maxInactiveDays > 0 {
-				consecutiveInactiveDays++
-				if consecutiveInactiveDays >= maxInactiveDays {
-					log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.TickerName, maxInactiveDays)
-					return stats, pending, nil
+			if errors.Is(err, db.ErrNotFound) {
+				entity := models.TickerHistory{
+					TradingSessionDate:   date,
+					TradingSessionActive: false,
+					TickerInfoID:         tickerCfg.ID,
 				}
+				if insertErr := s.repo.Insert(ctx, entity); insertErr != nil {
+					return stats, nil, insertErr
+				}
+				stats.Created++
 			}
-
-			entity := models.TickerHistory{
-				TradingSessionDate:   date,
-				TradingSessionActive: false,
-				TickerInfoID:         tickerCfg.ID,
+			if maxInactiveDays > 0 && consecutiveInactiveDays >= maxInactiveDays {
+				log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.TickerName, maxInactiveDays)
+				return stats, pending, nil
 			}
-			if insertErr := s.repo.Insert(ctx, entity); insertErr != nil {
-				return stats, nil, insertErr
-			}
-			stats.Created++
-
 			date = date.AddDate(0, 0, -1)
 			continue
 		}
 
 		tradingSessionsFound++
-		consecutiveInactiveDays = 0
 
 		metrics, err := s.collectMetrics(ctx, tickerCfg, securityInfo, *historyRow)
 		if err != nil {
