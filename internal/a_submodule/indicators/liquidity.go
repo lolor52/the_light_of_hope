@@ -1,4 +1,4 @@
-package tickers_filling
+package indicators
 
 import (
 	"math"
@@ -14,40 +14,40 @@ const (
 	minTradesForRoll     = 3
 )
 
-type liquidityMetrics struct {
-	valid           bool
-	vTotal          float64
-	vMedian         float64
-	activeShare     float64
-	illiq           float64
-	roll            float64
-	rollFromCandles bool
-	tickPercent     float64
-	depthProxy      float64
+type LiquidityMetrics struct {
+	Valid           bool
+	VTotal          float64
+	VMedian         float64
+	ActiveShare     float64
+	Illiq           float64
+	Roll            float64
+	RollFromCandles bool
+	TickPercent     float64
+	DepthProxy      float64
 }
 
-func calculateLiquidity(series mainSessionSeries, trades []moex.Trade, info moex.SecurityInfo) (liquidityMetrics, error) {
-	if series.length() < minMinutesForSession {
-		return liquidityMetrics{valid: false}, nil
+func CalculateLiquidity(series SessionSeries, trades []moex.Trade, info moex.SecurityInfo) (LiquidityMetrics, error) {
+	if series.Length() < minMinutesForSession {
+		return LiquidityMetrics{Valid: false}, nil
 	}
 
-	metrics := liquidityMetrics{valid: true}
+	metrics := LiquidityMetrics{Valid: true}
 
-	metrics.vTotal = series.totalValue()
+	metrics.VTotal = series.TotalValue()
 
-	activeValues := series.activeValues(func(bar minuteBar) (float64, bool) {
+	activeValues := series.ActiveValues(func(bar MinuteBar) (float64, bool) {
 		return bar.Value, true
 	})
 	if len(activeValues) > 0 {
-		metrics.vMedian = median(activeValues)
+		metrics.VMedian = Median(activeValues)
 	} else {
-		metrics.vMedian = math.NaN()
+		metrics.VMedian = math.NaN()
 	}
 
-	metrics.activeShare = float64(series.activeCount()) / float64(series.length())
+	metrics.ActiveShare = float64(series.ActiveCount()) / float64(series.Length())
 
-	logs := series.logReturns()
-	values := series.values()
+	logs := series.LogReturns()
+	values := series.Values()
 	illiqValues := make([]float64, 0, len(series.Bars))
 	for i := range series.Bars {
 		if !series.Bars[i].Active {
@@ -64,28 +64,28 @@ func calculateLiquidity(series mainSessionSeries, trades []moex.Trade, info moex
 		illiqValues = append(illiqValues, r/denom)
 	}
 	if len(illiqValues) > 0 {
-		metrics.illiq = mean(illiqValues)
+		metrics.Illiq = Mean(illiqValues)
 	} else {
-		metrics.illiq = math.NaN()
+		metrics.Illiq = math.NaN()
 	}
 
 	roll, fromCandles := calculateRoll(series, trades)
-	metrics.roll = roll
-	metrics.rollFromCandles = fromCandles
+	metrics.Roll = roll
+	metrics.RollFromCandles = fromCandles
 
-	priceRef := series.priceRef()
+	priceRef := series.PriceRef()
 	if info.MinStep > 0 && priceRef > 0 {
-		metrics.tickPercent = 10000 * info.MinStep / priceRef
+		metrics.TickPercent = 10000 * info.MinStep / priceRef
 	} else {
-		metrics.tickPercent = math.NaN()
+		metrics.TickPercent = math.NaN()
 	}
 
-	metrics.depthProxy = calculateDepthProxy(series)
+	metrics.DepthProxy = calculateDepthProxy(series)
 
 	return metrics, nil
 }
 
-func calculateRoll(series mainSessionSeries, trades []moex.Trade) (float64, bool) {
+func calculateRoll(series SessionSeries, trades []moex.Trade) (float64, bool) {
 	filtered := filterTrades(series, trades)
 	if len(filtered) >= minTradesForRoll {
 		diffs := tradeDiffs(filtered)
@@ -98,7 +98,7 @@ func calculateRoll(series mainSessionSeries, trades []moex.Trade) (float64, bool
 	}
 
 	diffs := make([]float64, 0, len(series.Bars))
-	closes := series.closes()
+	closes := series.Closes()
 	for i := 1; i < len(closes); i++ {
 		if closes[i] == 0 || closes[i-1] == 0 {
 			continue
@@ -115,7 +115,7 @@ func calculateRoll(series mainSessionSeries, trades []moex.Trade) (float64, bool
 	return 2 * math.Sqrt(math.Max(0, -cov)), true
 }
 
-func filterTrades(series mainSessionSeries, trades []moex.Trade) []moex.Trade {
+func filterTrades(series SessionSeries, trades []moex.Trade) []moex.Trade {
 	bounds := seriesBounds(series)
 	result := make([]moex.Trade, 0, len(trades))
 	for _, trade := range trades {
@@ -138,7 +138,7 @@ type sessionBounds struct {
 	end   time.Time
 }
 
-func seriesBounds(series mainSessionSeries) sessionBounds {
+func seriesBounds(series SessionSeries) sessionBounds {
 	if len(series.Bars) == 0 {
 		return sessionBounds{}
 	}
@@ -159,8 +159,8 @@ func laggedCovariance(diffs []float64) float64 {
 	}
 	x := diffs[1:]
 	y := diffs[:len(diffs)-1]
-	meanX := mean(x)
-	meanY := mean(y)
+	meanX := Mean(x)
+	meanY := Mean(y)
 	var sum float64
 	for i := range y {
 		sum += (x[i] - meanX) * (y[i] - meanY)
@@ -168,8 +168,8 @@ func laggedCovariance(diffs []float64) float64 {
 	return sum / float64(len(y))
 }
 
-func calculateDepthProxy(series mainSessionSeries) float64 {
-	returns := series.logReturns()
+func calculateDepthProxy(series SessionSeries) float64 {
+	returns := series.LogReturns()
 	rValues := make([]float64, 0, len(series.Bars))
 	valueOverReturn := make([]float64, 0, len(series.Bars))
 	for i := range series.Bars {
@@ -184,7 +184,7 @@ func calculateDepthProxy(series mainSessionSeries) float64 {
 	if len(rValues) == 0 {
 		return math.NaN()
 	}
-	tau := quantile(rValues, 0.05)
+	tau := Quantile(rValues, 0.05)
 	for i := range series.Bars {
 		if !series.Bars[i].Active {
 			continue
@@ -201,10 +201,10 @@ func calculateDepthProxy(series mainSessionSeries) float64 {
 	if len(valueOverReturn) == 0 {
 		return math.NaN()
 	}
-	return median(valueOverReturn)
+	return Median(valueOverReturn)
 }
 
-func normalizeLiquidity(items []liquidityMetrics) []float64 {
+func NormalizeLiquidity(items []LiquidityMetrics) []float64 {
 	if len(items) == 0 {
 		return nil
 	}
@@ -220,44 +220,44 @@ func normalizeLiquidity(items []liquidityMetrics) []float64 {
 	}
 
 	for _, item := range items {
-		if !item.valid {
+		if !item.Valid {
 			continue
 		}
-		values["vtotal"] = append(values["vtotal"], item.vTotal)
-		values["vmedian"] = append(values["vmedian"], item.vMedian)
-		values["depth"] = append(values["depth"], item.depthProxy)
-		values["active"] = append(values["active"], item.activeShare)
-		values["illiq"] = append(values["illiq"], item.illiq)
-		values["roll"] = append(values["roll"], item.roll)
-		values["tick"] = append(values["tick"], item.tickPercent)
+		values["vtotal"] = append(values["vtotal"], item.VTotal)
+		values["vmedian"] = append(values["vmedian"], item.VMedian)
+		values["depth"] = append(values["depth"], item.DepthProxy)
+		values["active"] = append(values["active"], item.ActiveShare)
+		values["illiq"] = append(values["illiq"], item.Illiq)
+		values["roll"] = append(values["roll"], item.Roll)
+		values["tick"] = append(values["tick"], item.TickPercent)
 	}
 
 	quantiles := make(map[string]struct{ p5, p95 float64 })
 	for key, arr := range values {
-		clean := filterFinite(arr)
+		clean := FilterFinite(arr)
 		if len(clean) == 0 {
 			quantiles[key] = struct{ p5, p95 float64 }{math.NaN(), math.NaN()}
 			continue
 		}
 		quantiles[key] = struct{ p5, p95 float64 }{
-			p5:  quantile(clean, 0.05),
-			p95: quantile(clean, 0.95),
+			p5:  Quantile(clean, 0.05),
+			p95: Quantile(clean, 0.95),
 		}
 	}
 
 	scores := make([]float64, len(items))
 	for i, item := range items {
-		if !item.valid {
+		if !item.Valid {
 			scores[i] = math.NaN()
 			continue
 		}
-		vTotalNorm := normUpQuantile(item.vTotal, quantiles["vtotal"])
-		vMedianNorm := normUpQuantile(item.vMedian, quantiles["vmedian"])
-		depthNorm := normUpQuantile(item.depthProxy, quantiles["depth"])
-		activeNorm := normUpQuantile(item.activeShare, quantiles["active"])
-		illiqNorm := normDownQuantile(item.illiq, quantiles["illiq"])
-		rollNorm := normDownQuantile(item.roll, quantiles["roll"])
-		tickNorm := normDownQuantile(item.tickPercent, quantiles["tick"])
+		vTotalNorm := normUpQuantile(item.VTotal, quantiles["vtotal"])
+		vMedianNorm := normUpQuantile(item.VMedian, quantiles["vmedian"])
+		depthNorm := normUpQuantile(item.DepthProxy, quantiles["depth"])
+		activeNorm := normUpQuantile(item.ActiveShare, quantiles["active"])
+		illiqNorm := normDownQuantile(item.Illiq, quantiles["illiq"])
+		rollNorm := normDownQuantile(item.Roll, quantiles["roll"])
+		tickNorm := normDownQuantile(item.TickPercent, quantiles["tick"])
 
 		vTotalNorm = safeValue(vTotalNorm)
 		vMedianNorm = safeValue(vMedianNorm)
@@ -276,20 +276,10 @@ func normalizeLiquidity(items []liquidityMetrics) []float64 {
 		score += 0.05 * rollNorm
 		score += 0.05 * tickNorm
 
-		scores[i] = 100 * clip(score, 0, 1)
+		scores[i] = 100 * Clip(score, 0, 1)
 	}
 
 	return scores
-}
-
-func filterFinite(values []float64) []float64 {
-	result := make([]float64, 0, len(values))
-	for _, value := range values {
-		if !math.IsNaN(value) && !math.IsInf(value, 0) {
-			result = append(result, value)
-		}
-	}
-	return result
 }
 
 func normUpQuantile(value float64, q struct{ p5, p95 float64 }) float64 {
@@ -299,7 +289,7 @@ func normUpQuantile(value float64, q struct{ p5, p95 float64 }) float64 {
 	if math.IsNaN(q.p5) || math.IsNaN(q.p95) || q.p5 == q.p95 {
 		return math.NaN()
 	}
-	return clip((value-q.p5)/(q.p95-q.p5+liquidityEpsilon), 0, 1)
+	return Clip((value-q.p5)/(q.p95-q.p5+liquidityEpsilon), 0, 1)
 }
 
 func normDownQuantile(value float64, q struct{ p5, p95 float64 }) float64 {
