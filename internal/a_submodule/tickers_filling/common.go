@@ -3,6 +3,7 @@ package tickers_filling
 import (
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strings"
@@ -39,28 +40,111 @@ type valueAreaResult struct {
 
 func resolveSessionSchedule(intervals []moex.SessionInterval) (sessionSchedule, error) {
 	schedule := sessionSchedule{}
+	var intervalLogs []string
+	var longestNamedDuration time.Duration
+
 	for _, interval := range intervals {
 		name := strings.ToLower(interval.Name)
+		intervalLogs = append(intervalLogs, fmt.Sprintf("%s [%s - %s]", name, interval.Start.Format(time.RFC3339), interval.End.Format(time.RFC3339)))
+
 		switch {
-		case strings.Contains(name, "основ") || strings.Contains(name, "main"):
-			schedule.MainStart = interval.Start
-			schedule.MainEnd = interval.End
-		case strings.Contains(name, "аукцион отк") || strings.Contains(name, "open auction"):
+		case isAuctionOpen(name):
 			start := interval.Start
 			end := interval.End
 			schedule.AuctionOpenStart = &start
 			schedule.AuctionOpenEnd = &end
-		case strings.Contains(name, "аукцион зак") || strings.Contains(name, "close auction"):
+		case isAuctionClose(name):
 			start := interval.Start
 			end := interval.End
 			schedule.AuctionCloseStart = &start
 			schedule.AuctionCloseEnd = &end
+		case isMainSessionName(name):
+			if !interval.End.After(interval.Start) {
+				continue
+			}
+			duration := interval.End.Sub(interval.Start)
+			if schedule.MainStart.IsZero() || duration > longestNamedDuration {
+				schedule.MainStart = interval.Start
+				schedule.MainEnd = interval.End
+				longestNamedDuration = duration
+			}
 		}
 	}
+
+	if len(intervalLogs) > 0 {
+		log.Printf("tickers_filling: интервалы торговой сессии: %s", strings.Join(intervalLogs, "; "))
+	}
+
+	if schedule.MainStart.IsZero() || schedule.MainEnd.IsZero() {
+		longestDuration := time.Duration(0)
+		var longest moex.SessionInterval
+		for _, interval := range intervals {
+			name := strings.ToLower(interval.Name)
+			if isAuction(name) || isExcludedFromMain(name) {
+				continue
+			}
+			if !interval.End.After(interval.Start) {
+				continue
+			}
+			duration := interval.End.Sub(interval.Start)
+			if duration > longestDuration {
+				longestDuration = duration
+				longest = interval
+			}
+		}
+
+		if longestDuration > 0 {
+			schedule.MainStart = longest.Start
+			schedule.MainEnd = longest.End
+			log.Printf(
+				"tickers_filling: основной интервал выбран по максимальной длительности: %s [%s - %s]",
+				strings.ToLower(longest.Name),
+				longest.Start.Format(time.RFC3339),
+				longest.End.Format(time.RFC3339),
+			)
+		}
+	}
+
 	if schedule.MainStart.IsZero() || schedule.MainEnd.IsZero() {
 		return schedule, errors.New("main session interval not found")
 	}
 	return schedule, nil
+}
+
+func isMainSessionName(name string) bool {
+	if isExcludedFromMain(name) || isAuction(name) {
+		return false
+	}
+
+	mainKeywords := []string{"основ", "main", "регуляр", "regular", "дневн", "основной режим"}
+	for _, keyword := range mainKeywords {
+		if strings.Contains(name, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isExcludedFromMain(name string) bool {
+	excludedKeywords := []string{"утрен", "pre-market", "предторгов", "вечер", "evening"}
+	for _, keyword := range excludedKeywords {
+		if strings.Contains(name, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAuction(name string) bool {
+	return strings.Contains(name, "аукцион") || strings.Contains(name, "auction")
+}
+
+func isAuctionOpen(name string) bool {
+	return strings.Contains(name, "аукцион отк") || strings.Contains(name, "open auction")
+}
+
+func isAuctionClose(name string) bool {
+	return strings.Contains(name, "аукцион зак") || strings.Contains(name, "close auction")
 }
 
 func (s sessionSchedule) contains(t time.Time) bool {
