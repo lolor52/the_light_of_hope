@@ -1,4 +1,4 @@
-package tickers_filling
+package indicators
 
 import (
 	"errors"
@@ -8,18 +8,21 @@ import (
 const (
 	volatilityEpsilon = 1e-9
 	atrPeriod         = 14
-	atrHistoryDays    = 60
-	rvolHistoryDays   = 20
 )
 
-type sessionVolatilityInput struct {
-	Series    mainSessionSeries
+const (
+	ATRHistoryDays  = 60
+	RVOLHistoryDays = 20
+)
+
+type SessionVolatilityInput struct {
+	Series    SessionSeries
 	PrevClose float64
 }
 
-type volatilityMetrics struct {
-	valid bool
-	value float64
+type VolatilityMetrics struct {
+	Valid bool
+	Value float64
 }
 
 type volatilityHistoryDay struct {
@@ -32,23 +35,23 @@ type quantilePair struct {
 	P95 float64
 }
 
-func calculateVolatility(current sessionVolatilityInput, atrHistory, rvolHistory []sessionVolatilityInput) (volatilityMetrics, error) {
-	if current.Series.length() == 0 {
-		return volatilityMetrics{}, errors.New("empty series for volatility")
+func CalculateVolatility(current SessionVolatilityInput, atrHistory, rvolHistory []SessionVolatilityInput) (VolatilityMetrics, error) {
+	if current.Series.Length() == 0 {
+		return VolatilityMetrics{}, errors.New("empty series for volatility")
 	}
 
 	currentDay, err := buildVolatilityDay(current)
 	if err != nil {
-		return volatilityMetrics{}, err
+		return VolatilityMetrics{}, err
 	}
 
 	atrHistDays, err := buildVolatilityHistory(atrHistory)
 	if err != nil {
-		return volatilityMetrics{}, err
+		return VolatilityMetrics{}, err
 	}
 	rvolHistDays, err := buildVolatilityHistory(rvolHistory)
 	if err != nil {
-		return volatilityMetrics{}, err
+		return VolatilityMetrics{}, err
 	}
 
 	atrSeries := computeATRSeries(atrHistDays)
@@ -72,16 +75,16 @@ func calculateVolatility(current sessionVolatilityInput, atrHistory, rvolHistory
 		atrNorm := normalizeByQuantiles(atrValue, atrQuantiles[i], volatilityEpsilon)
 		rvolNorm := normalizeByQuantiles(rvolValue, rvolQuantiles[i], volatilityEpsilon)
 
-		atrNorm = safeValue(atrNorm)
-		rvolNorm = safeValue(rvolNorm)
+		atrNorm = SafeValue(atrNorm)
+		rvolNorm = SafeValue(rvolNorm)
 
 		sessionValues[i] = 100 * (0.6*atrNorm + 0.4*rvolNorm)
 	}
 
-	return volatilityMetrics{valid: true, value: mean(sessionValues)}, nil
+	return VolatilityMetrics{Valid: true, Value: Mean(sessionValues)}, nil
 }
 
-func buildVolatilityHistory(inputs []sessionVolatilityInput) ([]volatilityHistoryDay, error) {
+func buildVolatilityHistory(inputs []SessionVolatilityInput) ([]volatilityHistoryDay, error) {
 	result := make([]volatilityHistoryDay, 0, len(inputs))
 	for _, input := range inputs {
 		day, err := buildVolatilityDay(input)
@@ -93,7 +96,7 @@ func buildVolatilityHistory(inputs []sessionVolatilityInput) ([]volatilityHistor
 	return result, nil
 }
 
-func buildVolatilityDay(input sessionVolatilityInput) (volatilityHistoryDay, error) {
+func buildVolatilityDay(input SessionVolatilityInput) (volatilityHistoryDay, error) {
 	bars := input.Series.Bars
 	if len(bars) == 0 {
 		return volatilityHistoryDay{}, errors.New("empty session series")
@@ -210,14 +213,14 @@ func computeRVOLSeries(history []volatilityHistoryDay, averages map[int]float64)
 func quantilesFromSeries(series map[int][]float64) map[int]quantilePair {
 	result := make(map[int]quantilePair)
 	for idx, values := range series {
-		clean := filterFinite(values)
+		clean := FilterFinite(values)
 		if len(clean) == 0 {
 			result[idx] = quantilePair{P5: math.NaN(), P95: math.NaN()}
 			continue
 		}
 		result[idx] = quantilePair{
-			P5:  quantile(clean, 0.05),
-			P95: quantile(clean, 0.95),
+			P5:  Quantile(clean, 0.05),
+			P95: Quantile(clean, 0.95),
 		}
 	}
 	return result
@@ -233,5 +236,5 @@ func normalizeByQuantiles(value float64, pair quantilePair, eps float64) float64
 	if pair.P95 == pair.P5 {
 		return 0.5
 	}
-	return clip((value-pair.P5)/(pair.P95-pair.P5+eps), 0, 1)
+	return Clip((value-pair.P5)/(pair.P95-pair.P5+eps), 0, 1)
 }
