@@ -224,8 +224,8 @@ type sessionRawMetrics struct {
 	VAL        *string
 	VAH        *string
 	FlatTrend  *flatTrendComponents
-	Volatility *volatilityComponents
-	Liquidity  *liquidityComponents
+	Volatility *volatilityMetrics
+	Liquidity  *liquidityMetrics
 }
 
 type pendingRecord struct {
@@ -236,50 +236,150 @@ type pendingRecord struct {
 func (s *Service) collectMetrics(ctx context.Context, tickerCfg models.TickerInfo, securityInfo moex.SecurityInfo, historyRow moex.HistoryRow) (sessionRawMetrics, error) {
 	metrics := sessionRawMetrics{}
 
+	intervals, err := s.moexClient.GetBoardSessions(ctx, tickerCfg.BoardID, tickerCfg.SecID, historyRow.TradeDate)
+	if err != nil {
+		return metrics, fmt.Errorf("load sessions: %w", err)
+	}
+	schedule, err := resolveSessionSchedule(intervals)
+	if err != nil {
+		return metrics, fmt.Errorf("resolve session schedule: %w", err)
+	}
+
 	candles, err := s.moexClient.GetMinuteCandles(ctx, tickerCfg.BoardID, tickerCfg.SecID, historyRow.TradeDate)
 	if err != nil {
 		return metrics, fmt.Errorf("minute candles: %w", err)
 	}
 
-	vwapValue, err := calculateVWAP(candles)
-	if err == nil {
-		metrics.VWAP = formatFloat(vwapValue)
+	trades, err := s.moexClient.GetTrades(ctx, tickerCfg.BoardID, tickerCfg.SecID, historyRow.TradeDate)
+	if err != nil {
+		log.Printf("tickers_filling: не удалось загрузить сделки %s: %v", tickerCfg.TickerName, err)
 	}
 
-	valueArea, err := calculateValueArea(candles, securityInfo.MinStep)
-	if err == nil {
+	prevRow, err := s.prevTradingDay(ctx, tickerCfg, historyRow.TradeDate)
+	var prevSeries mainSessionSeries
+	var prevClose float64
+	if err == nil && prevRow != nil {
+		prevSeries, prevClose, err = s.loadSeriesForDate(ctx, tickerCfg, securityInfo, prevRow.TradeDate, prevRow.Close)
+		if err != nil {
+			log.Printf("tickers_filling: не удалось загрузить предыдущую сессию %s: %v", tickerCfg.TickerName, err)
+		}
+	}
+
+	fallbacks := priceFallbacks{
+		PrevSessionClose: prevClose,
+		FirstTradePrice:  firstTradePrice(trades, schedule),
+	}
+	currentSeries, err := buildMinuteSeries(candles, schedule, fallbacks, securityInfo.LotSize)
+	if err != nil {
+		return metrics, fmt.Errorf("build minute series: %w", err)
+	}
+
+	if vwapValue, err := calculateVWAP(currentSeries); err == nil {
+		metrics.VWAP = formatFloat(vwapValue)
+	}
+	if valueArea, err := calculateValueArea(currentSeries, securityInfo.MinStep); err == nil {
 		metrics.VAL = formatFloat(valueArea.VAL)
 		metrics.VAH = formatFloat(valueArea.VAH)
 	}
 
-	prevRow, err := s.prevTradingDay(ctx, tickerCfg, historyRow.TradeDate)
-	if err == nil && prevRow != nil {
-		filterValue, err := calculateFlatTrendComponents(candles, historyRow, *prevRow)
-		if err == nil {
+	if prevSeries.length() > 0 {
+		if filterValue, err := calculateFlatTrendComponents(currentSeries, prevSeries); err == nil {
 			metrics.FlatTrend = &filterValue
 		}
 	}
 
-	historyWindow, err := s.moexClient.GetHistoryWindow(ctx, tickerCfg.BoardID, tickerCfg.SecID, historyRow.TradeDate.AddDate(0, 0, -60), historyRow.TradeDate)
-	if err == nil && len(historyWindow) > 0 {
-		volValue, err := calculateVolatilityComponents(historyRow, candles, historyWindow)
-		if err == nil {
-			metrics.Volatility = &volValue
-		}
+	if volMetrics, err := s.computeVolatility(ctx, tickerCfg, securityInfo, historyRow.TradeDate, currentSeries, prevSeries); err == nil && volMetrics.valid {
+		metrics.Volatility = &volMetrics
 	}
 
-	marketData, err := s.moexClient.GetMarketData(ctx, tickerCfg.BoardID, tickerCfg.SecID, historyRow.TradeDate)
-	if err == nil {
-		orderBook, err := s.moexClient.GetOrderBook(ctx, tickerCfg.BoardID, tickerCfg.SecID, historyRow.TradeDate, 5)
-		if err == nil {
-			liquidityValue, err := calculateLiquidityComponents(candles, marketData, orderBook, securityInfo)
-			if err == nil {
-				metrics.Liquidity = &liquidityValue
-			}
-		}
+	if liqMetrics, err := s.computeLiquidity(ctx, securityInfo, currentSeries, trades); err == nil {
+		metrics.Liquidity = &liqMetrics
 	}
 
 	return metrics, nil
+}
+
+func (s *Service) computeVolatility(ctx context.Context, tickerCfg models.TickerInfo, securityInfo moex.SecurityInfo, date time.Time, currentSeries, prevSeries mainSessionSeries) (volatilityMetrics, error) {
+	maxHistory := atrHistoryDays
+	if rvolHistoryDays > maxHistory {
+		maxHistory = rvolHistoryDays
+	}
+	historyInputs, err := s.loadHistoricalSeries(ctx, tickerCfg, securityInfo, date, maxHistory)
+	if err != nil {
+		return volatilityMetrics{}, err
+	}
+
+	atrHistory := historyInputs
+	if len(atrHistory) > atrHistoryDays {
+		atrHistory = atrHistory[:atrHistoryDays]
+	}
+	rvolHistory := historyInputs
+	if len(rvolHistory) > rvolHistoryDays {
+		rvolHistory = rvolHistory[:rvolHistoryDays]
+	}
+
+	prevClose := 0.0
+	if prevSeries.length() > 0 {
+		prevClose = prevSeries.Bars[len(prevSeries.Bars)-1].Close
+	}
+
+	currentInput := sessionVolatilityInput{Series: currentSeries, PrevClose: prevClose}
+	return calculateVolatility(currentInput, atrHistory, rvolHistory)
+}
+
+func (s *Service) computeLiquidity(ctx context.Context, securityInfo moex.SecurityInfo, series mainSessionSeries, trades []moex.Trade) (liquidityMetrics, error) {
+	return calculateLiquidity(series, trades, securityInfo)
+}
+
+func (s *Service) loadHistoricalSeries(ctx context.Context, tickerCfg models.TickerInfo, securityInfo moex.SecurityInfo, before time.Time, limit int) ([]sessionVolatilityInput, error) {
+	result := make([]sessionVolatilityInput, 0, limit)
+	date := before.AddDate(0, 0, -1)
+	attempts := 0
+	maxAttempts := limit * 6
+	for len(result) < limit && attempts < maxAttempts {
+		attempts++
+		row, err := s.moexClient.GetHistoryRow(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
+		if err != nil {
+			return nil, fmt.Errorf("history row %s: %w", date.Format("2006-01-02"), err)
+		}
+		if row == nil || row.Volume <= 0 {
+			date = date.AddDate(0, 0, -1)
+			continue
+		}
+
+		series, closePrice, err := s.loadSeriesForDate(ctx, tickerCfg, securityInfo, date, row.Close)
+		if err != nil {
+			date = date.AddDate(0, 0, -1)
+			continue
+		}
+		result = append(result, sessionVolatilityInput{Series: series, PrevClose: closePrice})
+		date = date.AddDate(0, 0, -1)
+	}
+	return result, nil
+}
+
+func (s *Service) loadSeriesForDate(ctx context.Context, tickerCfg models.TickerInfo, securityInfo moex.SecurityInfo, date time.Time, prevClose float64) (mainSessionSeries, float64, error) {
+	intervals, err := s.moexClient.GetBoardSessions(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
+	if err != nil {
+		return mainSessionSeries{}, 0, err
+	}
+	schedule, err := resolveSessionSchedule(intervals)
+	if err != nil {
+		return mainSessionSeries{}, 0, err
+	}
+	candles, err := s.moexClient.GetMinuteCandles(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
+	if err != nil {
+		return mainSessionSeries{}, 0, err
+	}
+	series, err := buildMinuteSeries(candles, schedule, priceFallbacks{PrevSessionClose: prevClose}, securityInfo.LotSize)
+	if err != nil {
+		return mainSessionSeries{}, 0, err
+	}
+	closePrice := prevClose
+	if series.length() > 0 {
+		closePrice = series.Bars[len(series.Bars)-1].Close
+	}
+	return series, closePrice, nil
 }
 
 func (s *Service) finalizeAndInsertPending(ctx context.Context, pending []pendingRecord) (int, error) {
@@ -291,8 +391,8 @@ func (s *Service) finalizeAndInsertPending(ctx context.Context, pending []pendin
 
 	for _, records := range grouped {
 		applyFlatTrendNormalization(records)
-		applyVolatilityNormalization(records)
 		applyLiquidityNormalization(records)
+		applyVolatilityAssignment(records)
 	}
 
 	created := 0
@@ -323,67 +423,20 @@ func applyFlatTrendNormalization(records []*pendingRecord) {
 		return
 	}
 
-	overlaps := make([]float64, len(items))
-	slopes := make([]float64, len(items))
-	skews := make([]float64, len(items))
+	comps := make([]flatTrendComponents, len(items))
 	for i, it := range items {
-		overlaps[i] = it.cmp.OverlapPercent
-		slopes[i] = it.cmp.SlopeAbs
-		skews[i] = it.cmp.SkewPercent
+		comps[i] = *it.cmp
 	}
-
-	overlapMin, overlapMax := minMax(overlaps)
-	slopeMin, slopeMax := minMax(slopes)
-	skewMin, skewMax := minMax(skews)
-
+	normalized := normalizeFlatTrend(comps)
 	for i, it := range items {
-		overlapNorm := normUp(overlaps[i], overlapMin, overlapMax)
-		slopeNorm := normDown(slopes[i], slopeMin, slopeMax)
-		skewNorm := normDown(skews[i], skewMin, skewMax)
-		value := 100 * (0.5*overlapNorm + 0.3*slopeNorm + 0.2*skewNorm)
-		it.rec.entity.FlatTrendFilter = formatFloat(value)
-	}
-}
-
-func applyVolatilityNormalization(records []*pendingRecord) {
-	type item struct {
-		rec *pendingRecord
-		cmp *volatilityComponents
-	}
-
-	var items []item
-	for _, record := range records {
-		if record.raw.Volatility == nil {
-			continue
-		}
-		items = append(items, item{rec: record, cmp: record.raw.Volatility})
-	}
-	if len(items) == 0 {
-		return
-	}
-
-	atrValues := make([]float64, len(items))
-	rvolValues := make([]float64, len(items))
-	for i, it := range items {
-		atrValues[i] = it.cmp.ATRPercent
-		rvolValues[i] = it.cmp.RelativeVolume
-	}
-
-	atrMin, atrMax := minMax(atrValues)
-	rvolMin, rvolMax := minMax(rvolValues)
-
-	for i, it := range items {
-		atrNorm := normUp(atrValues[i], atrMin, atrMax)
-		rvolNorm := normUp(rvolValues[i], rvolMin, rvolMax)
-		value := 100 * (0.6*atrNorm + 0.4*rvolNorm)
-		it.rec.entity.Volatility = formatFloat(value)
+		it.rec.entity.FlatTrendFilter = formatFloat(normalized[i])
 	}
 }
 
 func applyLiquidityNormalization(records []*pendingRecord) {
 	type item struct {
 		rec *pendingRecord
-		cmp *liquidityComponents
+		cmp *liquidityMetrics
 	}
 
 	var items []item
@@ -397,55 +450,23 @@ func applyLiquidityNormalization(records []*pendingRecord) {
 		return
 	}
 
-	spreadValues := make([]float64, len(items))
-	turnoverValues := make([]float64, len(items))
-	depthValues := make([]float64, len(items))
-	tickValues := make([]float64, len(items))
+	metrics := make([]liquidityMetrics, len(items))
 	for i, it := range items {
-		spreadValues[i] = it.cmp.SpreadRelativePercent
-		turnoverValues[i] = it.cmp.TurnoverPerMinute
-		depthValues[i] = it.cmp.DepthTopFive
-		tickValues[i] = it.cmp.TickPercent
+		metrics[i] = *it.cmp
 	}
-
-	spreadMin, spreadMax := minMax(spreadValues)
-	turnoverMin, turnoverMax := minMax(turnoverValues)
-	depthMin, depthMax := minMax(depthValues)
-	tickMin, tickMax := minMax(tickValues)
-
+	normalized := normalizeLiquidity(metrics)
 	for i, it := range items {
-		spreadComponent := normDown(spreadValues[i], spreadMin, spreadMax)
-		turnoverComponent := normUp(turnoverValues[i], turnoverMin, turnoverMax)
-		depthComponent := normUp(depthValues[i], depthMin, depthMax)
-		tickComponent := normDown(tickValues[i], tickMin, tickMax)
-		value := 100 * (0.35*spreadComponent + 0.35*turnoverComponent + 0.25*depthComponent + 0.05*tickComponent)
-		it.rec.entity.Liquidity = formatFloat(value)
+		it.rec.entity.Liquidity = formatFloat(normalized[i])
 	}
 }
 
-func minMax(values []float64) (float64, float64) {
-	if len(values) == 0 {
-		return 0, 0
-	}
-	minVal := values[0]
-	maxVal := values[0]
-	for _, v := range values[1:] {
-		if v < minVal {
-			minVal = v
+func applyVolatilityAssignment(records []*pendingRecord) {
+	for _, record := range records {
+		if record.raw.Volatility == nil {
+			continue
 		}
-		if v > maxVal {
-			maxVal = v
-		}
+		record.entity.Volatility = formatFloat(record.raw.Volatility.value)
 	}
-	return minVal, maxVal
-}
-
-func normUp(value, minVal, maxVal float64) float64 {
-	return (value - minVal) / (maxVal - minVal + epsilon)
-}
-
-func normDown(value, minVal, maxVal float64) float64 {
-	return 1 - normUp(value, minVal, maxVal)
 }
 
 func (s *Service) securityInfo(ctx context.Context, tickerCfg models.TickerInfo) (moex.SecurityInfo, error) {

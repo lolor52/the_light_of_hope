@@ -3,6 +3,7 @@ package moex
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -10,6 +11,14 @@ func columnIndex(columns []string) map[string]int {
 	index := make(map[string]int, len(columns))
 	for i, column := range columns {
 		index[column] = i
+	}
+	return index
+}
+
+func columnIndexInsensitive(columns []string) map[string]int {
+	index := make(map[string]int, len(columns))
+	for i, column := range columns {
+		index[strings.ToUpper(column)] = i
 	}
 	return index
 }
