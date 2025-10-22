@@ -40,13 +40,11 @@ const flatTrendBandWidth = 0.05
 // NewService настраивает соединения и возвращает готовый сервис.
 func NewService(ctx context.Context, cfg config.Config) (*Service, error) {
 	if cfg.DatabaseURL == "" {
-		log.Printf("tickers_filling: DATABASE_URL отсутствует в конфиге")
 		return nil, errors.New("DATABASE_URL is empty in config")
 	}
 
 	dbConn, err := sql.Open("postgres", cfg.DatabaseURL)
 	if err != nil {
-		log.Printf("tickers_filling: не удалось открыть соединение с БД: %v", err)
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
@@ -55,14 +53,12 @@ func NewService(ctx context.Context, cfg config.Config) (*Service, error) {
 	dbConn.SetMaxIdleConns(5)
 
 	if err := dbConn.PingContext(ctx); err != nil {
-		log.Printf("tickers_filling: не удалось выполнить ping БД: %v", err)
 		dbConn.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
 	moexClient, err := moex.NewClient(ctx, cfg.MOEXPassport.Login, cfg.MOEXPassport.Password)
 	if err != nil {
-		log.Printf("tickers_filling: не удалось создать клиент MOEX: %v", err)
 		dbConn.Close()
 		return nil, fmt.Errorf("create moex client: %w", err)
 	}
@@ -70,7 +66,6 @@ func NewService(ctx context.Context, cfg config.Config) (*Service, error) {
 	tickerInfoRepo := db.NewTickerInfoRepository(dbConn)
 	tickerInfos, err := tickerInfoRepo.ListAll(ctx)
 	if err != nil {
-		log.Printf("tickers_filling: не удалось загрузить тикеры из БД: %v", err)
 		dbConn.Close()
 		return nil, fmt.Errorf("load ticker info: %w", err)
 	}
@@ -104,7 +99,6 @@ func (s *Service) Run(ctx context.Context) (RunStats, error) {
 
 	loc, err := time.LoadLocation("Europe/Moscow")
 	if err != nil {
-		log.Printf("tickers_filling: не удалось загрузить временную зону Europe/Moscow: %v", err)
 		return stats, fmt.Errorf("load moscow location: %w", err)
 	}
 
@@ -125,7 +119,6 @@ func (s *Service) Run(ctx context.Context) (RunStats, error) {
 	if len(pending) > 0 {
 		created, err := s.finalizeAndInsertPending(ctx, pending)
 		if err != nil {
-			log.Printf("tickers_filling: ошибка при финализации %d записей: %v", len(pending), err)
 			return stats, err
 		}
 		stats.Created += created
@@ -140,7 +133,6 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 
 	securityInfo, err := s.securityInfo(ctx, tickerCfg)
 	if err != nil {
-		log.Printf("tickers_filling: не удалось получить security info для %s: %v", tickerCfg.TickerName, err)
 		return stats, nil, fmt.Errorf("security info: %w", err)
 	}
 
@@ -153,7 +145,6 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 	for tradingSessionsFound < sessionsTarget {
 		select {
 		case <-ctx.Done():
-			log.Printf("tickers_filling: контекст отменён при обработке %s: %v", tickerCfg.TickerName, ctx.Err())
 			return stats, nil, ctx.Err()
 		default:
 		}
@@ -175,13 +166,11 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 			continue
 		}
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			log.Printf("tickers_filling: ошибка при чтении истории %s за %s: %v", tickerCfg.TickerName, date.Format("2006-01-02"), err)
 			return stats, nil, err
 		}
 
 		historyRow, err := s.moexClient.GetHistoryRow(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
 		if err != nil {
-			log.Printf("tickers_filling: не удалось получить историю %s за %s: %v", tickerCfg.TickerName, date.Format("2006-01-02"), err)
 			return stats, nil, fmt.Errorf("get history row: %w", err)
 		}
 
@@ -223,7 +212,6 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 			TickerInfoID:         tickerCfg.ID,
 		}
 		if insertErr := s.repo.Insert(ctx, entity); insertErr != nil {
-			log.Printf("tickers_filling: не удалось вставить неактивную сессию %s за %s: %v", tickerCfg.TickerName, date.Format("2006-01-02"), insertErr)
 			return stats, nil, insertErr
 		}
 		stats.Created++
@@ -253,18 +241,15 @@ func (s *Service) collectMetrics(ctx context.Context, tickerCfg models.TickerInf
 
 	intervals, err := s.moexClient.GetBoardSessions(ctx, tickerCfg.BoardID, historyRow.TradeDate)
 	if err != nil {
-		log.Printf("tickers_filling: не удалось получить сессии для %s за %s: %v", tickerCfg.TickerName, historyRow.TradeDate.Format("2006-01-02"), err)
 		return metrics, fmt.Errorf("load sessions: %w", err)
 	}
 	schedule, err := resolveSessionSchedule(intervals)
 	if err != nil {
-		log.Printf("tickers_filling: не удалось определить расписание сессий для %s: %v", tickerCfg.TickerName, err)
 		return metrics, fmt.Errorf("resolve session schedule: %w", err)
 	}
 
 	candles, err := s.moexClient.GetMinuteCandles(ctx, tickerCfg.BoardID, tickerCfg.SecID, historyRow.TradeDate)
 	if err != nil {
-		log.Printf("tickers_filling: не удалось получить минутные свечи для %s за %s: %v", tickerCfg.TickerName, historyRow.TradeDate.Format("2006-01-02"), err)
 		return metrics, fmt.Errorf("minute candles: %w", err)
 	}
 
@@ -329,7 +314,6 @@ func (s *Service) finalizeAndInsertPending(ctx context.Context, pending []pendin
 	created := 0
 	for i := range pending {
 		if err := s.repo.Insert(ctx, pending[i].entity); err != nil {
-			log.Printf("tickers_filling: не удалось вставить запись %d за %s: %v", pending[i].entity.TickerInfoID, pending[i].entity.TradingSessionDate.Format("2006-01-02"), err)
 			return created, err
 		}
 		created++
@@ -394,7 +378,6 @@ func (s *Service) securityInfo(ctx context.Context, tickerCfg models.TickerInfo)
 	}
 	info, err := s.moexClient.GetSecurityInfo(ctx, tickerCfg.BoardID, tickerCfg.SecID)
 	if err != nil {
-		log.Printf("tickers_filling: не удалось получить security info %s: %v", tickerCfg.TickerName, err)
 		return moex.SecurityInfo{}, err
 	}
 	s.securityMap[key] = info
@@ -406,7 +389,6 @@ func (s *Service) prevTradingDay(ctx context.Context, tickerCfg models.TickerInf
 	for i := 0; i < 10; i++ {
 		row, err := s.moexClient.GetHistoryRow(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
 		if err != nil {
-			log.Printf("tickers_filling: не удалось получить предыдущую сессию %s за %s: %v", tickerCfg.TickerName, date.Format("2006-01-02"), err)
 			return nil, err
 		}
 		if row != nil && row.Volume > 0 {
@@ -414,6 +396,5 @@ func (s *Service) prevTradingDay(ctx context.Context, tickerCfg models.TickerInf
 		}
 		date = date.AddDate(0, 0, -1)
 	}
-	log.Printf("tickers_filling: не удалось найти предыдущую торговую сессию для %s", tickerCfg.TickerName)
 	return nil, fmt.Errorf("previous trading day not found for %s", tickerCfg.TickerName)
 }
