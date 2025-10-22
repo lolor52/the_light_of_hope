@@ -20,6 +20,7 @@ import (
 type Service struct {
 	cfg         config.Config
 	repo        *db.TickerRepository
+	tickerInfos []models.TickerInfo
 	db          *sql.DB
 	moexClient  *moex.Client
 	securityMap map[string]moex.SecurityInfo
@@ -57,9 +58,17 @@ func NewService(ctx context.Context, cfg config.Config) (*Service, error) {
 		return nil, fmt.Errorf("create moex client: %w", err)
 	}
 
+	tickerInfoRepo := db.NewTickerInfoRepository(dbConn)
+	tickerInfos, err := tickerInfoRepo.ListAll(ctx)
+	if err != nil {
+		dbConn.Close()
+		return nil, fmt.Errorf("load ticker info: %w", err)
+	}
+
 	service := &Service{
 		cfg:         cfg,
 		repo:        db.NewTickerRepository(dbConn),
+		tickerInfos: tickerInfos,
 		db:          dbConn,
 		moexClient:  moexClient,
 		securityMap: make(map[string]moex.SecurityInfo),
@@ -91,12 +100,12 @@ func (s *Service) Run(ctx context.Context) (RunStats, error) {
 	today := time.Now().In(loc)
 	startDate := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -1)
 
-	for _, tickerCfg := range s.cfg.MOEXTickers {
-		tickerStats, tickerPending, err := s.processTicker(ctx, tickerCfg, startDate)
+	for _, tickerInfo := range s.tickerInfos {
+		tickerStats, tickerPending, err := s.processTicker(ctx, tickerInfo, startDate)
 		stats.Existing += tickerStats.Existing
 		stats.Created += tickerStats.Created
 		if err != nil {
-			log.Printf("tickers_filling: ошибка при обработке тикера %s: %v", tickerCfg.Ticker, err)
+			log.Printf("tickers_filling: ошибка при обработке тикера %s: %v", tickerInfo.TickerName, err)
 			continue
 		}
 		pending = append(pending, tickerPending...)
@@ -113,7 +122,7 @@ func (s *Service) Run(ctx context.Context) (RunStats, error) {
 	return stats, nil
 }
 
-func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker, startDate time.Time) (RunStats, []pendingRecord, error) {
+func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo, startDate time.Time) (RunStats, []pendingRecord, error) {
 	var stats RunStats
 	var pending []pendingRecord
 
@@ -148,14 +157,14 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 			consecutiveInactiveDays++
 		}
 
-		_, err = s.repo.GetByDateAndName(ctx, tickerCfg.Ticker, date)
+		_, err = s.repo.GetByDateAndName(ctx, tickerCfg.TickerName, date)
 		if err == nil {
 			stats.Existing++
 			if sessionActive {
 				tradingSessionsFound++
 			}
 			if !sessionActive && maxInactiveDays > 0 && consecutiveInactiveDays >= maxInactiveDays {
-				log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.Ticker, maxInactiveDays)
+				log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.TickerName, maxInactiveDays)
 				return stats, pending, nil
 			}
 			// запись уже есть, перейдём к следующей дате
@@ -171,7 +180,7 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 				entity := models.TickerHistory{
 					TradingSessionDate:   date,
 					TradingSessionActive: false,
-					TickerName:           tickerCfg.Ticker,
+					TickerName:           tickerCfg.TickerName,
 					SecID:                tickerCfg.SecID,
 					BoardID:              tickerCfg.BoardID,
 				}
@@ -181,7 +190,7 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 				stats.Created++
 			}
 			if maxInactiveDays > 0 && consecutiveInactiveDays >= maxInactiveDays {
-				log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.Ticker, maxInactiveDays)
+				log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.TickerName, maxInactiveDays)
 				return stats, pending, nil
 			}
 			date = date.AddDate(0, 0, -1)
@@ -192,13 +201,13 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 
 		metrics, err := s.collectMetrics(ctx, tickerCfg, securityInfo, *historyRow)
 		if err != nil {
-			log.Printf("tickers_filling: не удалось рассчитать метрики для %s %s: %v", tickerCfg.Ticker, date.Format("2006-01-02"), err)
+			log.Printf("tickers_filling: не удалось рассчитать метрики для %s %s: %v", tickerCfg.TickerName, date.Format("2006-01-02"), err)
 		}
 
 		entity := models.TickerHistory{
 			TradingSessionDate:   date,
 			TradingSessionActive: true,
-			TickerName:           tickerCfg.Ticker,
+			TickerName:           tickerCfg.TickerName,
 			SecID:                tickerCfg.SecID,
 			BoardID:              tickerCfg.BoardID,
 			VWAP:                 metrics.VWAP,
@@ -228,7 +237,7 @@ type pendingRecord struct {
 	raw    sessionRawMetrics
 }
 
-func (s *Service) collectMetrics(ctx context.Context, tickerCfg config.MOEXTicker, securityInfo moex.SecurityInfo, historyRow moex.HistoryRow) (sessionRawMetrics, error) {
+func (s *Service) collectMetrics(ctx context.Context, tickerCfg models.TickerInfo, securityInfo moex.SecurityInfo, historyRow moex.HistoryRow) (sessionRawMetrics, error) {
 	metrics := sessionRawMetrics{}
 
 	candles, err := s.moexClient.GetMinuteCandles(ctx, tickerCfg.BoardID, tickerCfg.SecID, historyRow.TradeDate)
@@ -443,8 +452,8 @@ func normDown(value, minVal, maxVal float64) float64 {
 	return 1 - normUp(value, minVal, maxVal)
 }
 
-func (s *Service) securityInfo(ctx context.Context, tickerCfg config.MOEXTicker) (moex.SecurityInfo, error) {
-	key := tickerCfg.Ticker
+func (s *Service) securityInfo(ctx context.Context, tickerCfg models.TickerInfo) (moex.SecurityInfo, error) {
+	key := tickerCfg.TickerName
 	if info, ok := s.securityMap[key]; ok {
 		return info, nil
 	}
@@ -456,7 +465,7 @@ func (s *Service) securityInfo(ctx context.Context, tickerCfg config.MOEXTicker)
 	return info, nil
 }
 
-func (s *Service) prevTradingDay(ctx context.Context, tickerCfg config.MOEXTicker, from time.Time) (*moex.HistoryRow, error) {
+func (s *Service) prevTradingDay(ctx context.Context, tickerCfg models.TickerInfo, from time.Time) (*moex.HistoryRow, error) {
 	date := from.AddDate(0, 0, -1)
 	for i := 0; i < 10; i++ {
 		row, err := s.moexClient.GetHistoryRow(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
@@ -468,7 +477,7 @@ func (s *Service) prevTradingDay(ctx context.Context, tickerCfg config.MOEXTicke
 		}
 		date = date.AddDate(0, 0, -1)
 	}
-	return nil, fmt.Errorf("previous trading day not found for %s", tickerCfg.Ticker)
+	return nil, fmt.Errorf("previous trading day not found for %s", tickerCfg.TickerName)
 }
 
 func formatFloat(value float64) *string {

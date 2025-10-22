@@ -9,13 +9,6 @@ import (
 	"strings"
 )
 
-// MOEXTicker описывает параметры инструмента для сбора данных через MOEX ISS.
-type MOEXTicker struct {
-	Ticker  string `json:"ticker"`
-	SecID   string `json:"SecID"`
-	BoardID string `json:"BOARDID"`
-}
-
 // PassportCredentials содержит логин и пароль для MOEX Passport.
 type PassportCredentials struct {
 	Login    string `json:"login"`
@@ -25,7 +18,6 @@ type PassportCredentials struct {
 // Config агрегирует необходимые параметры запуска модуля выбора тикеров.
 type Config struct {
 	MOEXPassport                  PassportCredentials `json:"moex_passport"`
-	MOEXTickers                   []MOEXTicker        `json:"moex_tickers_secid_boardid"`
 	DatabaseURL                   string              `json:"DATABASE_URL"`
 	TickersFillingSessions        int                 `json:"tickers_filling_sessions"`
 	TickersFillingMaxInactiveDays int                 `json:"tickers_filling_max_inactive_days"`
