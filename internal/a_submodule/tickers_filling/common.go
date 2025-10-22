@@ -342,6 +342,19 @@ func firstTradePrice(trades []moex.Trade, schedule sessionSchedule) float64 {
 	return 0
 }
 
+func filterMainSessionTrades(trades []moex.Trade, schedule sessionSchedule) []moex.Trade {
+	result := make([]moex.Trade, 0, len(trades))
+	for _, trade := range trades {
+		if trade.Price <= 0 || trade.Quantity <= 0 {
+			continue
+		}
+		if schedule.contains(trade.Time) {
+			result = append(result, trade)
+		}
+	}
+	return result
+}
+
 func formatFloat(value float64) *string {
 	if math.IsNaN(value) {
 		return nil

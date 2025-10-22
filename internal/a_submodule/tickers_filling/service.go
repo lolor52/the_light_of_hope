@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"invest_intraday/internal/a_submodule/indicators"
@@ -32,6 +33,9 @@ type RunStats struct {
 	Existing int
 	Created  int
 }
+
+// flatTrendBandWidth задаёт параметр b из docs/flat_trend_filter.md.
+const flatTrendBandWidth = 0.05
 
 // NewService настраивает соединения и возвращает готовый сервис.
 func NewService(ctx context.Context, cfg config.Config) (*Service, error) {
@@ -224,8 +228,8 @@ type sessionRawMetrics struct {
 	VWAP       *string
 	VAL        *string
 	VAH        *string
-	FlatTrend  *indicators.FlatTrendComponents
-	Volatility *indicators.VolatilityMetrics
+	FlatTrend  *float64
+	Volatility *float64
 	Liquidity  *indicators.LiquidityMetrics
 }
 
@@ -255,15 +259,12 @@ func (s *Service) collectMetrics(ctx context.Context, tickerCfg models.TickerInf
 	if err != nil {
 		log.Printf("tickers_filling: не удалось загрузить сделки %s: %v", tickerCfg.TickerName, err)
 	}
+	sessionTrades := filterMainSessionTrades(trades, schedule)
 
 	prevRow, err := s.prevTradingDay(ctx, tickerCfg, historyRow.TradeDate)
-	var prevSeries mainSessionSeries
-	var prevClose float64
+	prevClose := 0.0
 	if err == nil && prevRow != nil {
-		prevSeries, prevClose, err = s.loadSeriesForDate(ctx, tickerCfg, securityInfo, prevRow.TradeDate, prevRow.Close)
-		if err != nil {
-			log.Printf("tickers_filling: не удалось загрузить предыдущую сессию %s: %v", tickerCfg.TickerName, err)
-		}
+		prevClose = prevRow.Close
 	}
 
 	fallbacks := priceFallbacks{
@@ -283,104 +284,20 @@ func (s *Service) collectMetrics(ctx context.Context, tickerCfg models.TickerInf
 		metrics.VAH = formatFloat(valueArea.VAH)
 	}
 
-	if prevSeries.Length() > 0 {
-		if filterValue, err := indicators.CalculateFlatTrendComponents(currentSeries, prevSeries); err == nil {
-			metrics.FlatTrend = &filterValue
-		}
+	flatParams := indicators.FlatTrendParams{BandWidthFactor: flatTrendBandWidth}
+	if score, err := indicators.CalculateFlatTrendScore(currentSeries, flatParams); err == nil {
+		metrics.FlatTrend = &score
 	}
 
-	if volMetrics, err := s.computeVolatility(ctx, tickerCfg, securityInfo, historyRow.TradeDate, currentSeries, prevSeries); err == nil && volMetrics.Valid {
-		metrics.Volatility = &volMetrics
+	if volMetrics, err := indicators.CalculateVolatilityMetrics(sessionTrades); err == nil {
+		metrics.Volatility = &volMetrics.Score
 	}
 
-	if liqMetrics, err := s.computeLiquidity(ctx, securityInfo, currentSeries, trades); err == nil {
+	if liqMetrics, err := indicators.CalculateLiquidityMetrics(sessionTrades); err == nil {
 		metrics.Liquidity = &liqMetrics
 	}
 
 	return metrics, nil
-}
-
-func (s *Service) computeVolatility(ctx context.Context, tickerCfg models.TickerInfo, securityInfo moex.SecurityInfo, date time.Time, currentSeries, prevSeries mainSessionSeries) (indicators.VolatilityMetrics, error) {
-	maxHistory := indicators.ATRHistoryDays
-	if indicators.RvolHistoryDays > maxHistory {
-		maxHistory = indicators.RvolHistoryDays
-	}
-	historyInputs, err := s.loadHistoricalSeries(ctx, tickerCfg, securityInfo, date, maxHistory)
-	if err != nil {
-		return indicators.VolatilityMetrics{}, err
-	}
-
-	atrHistory := historyInputs
-	if len(atrHistory) > indicators.ATRHistoryDays {
-		atrHistory = atrHistory[:indicators.ATRHistoryDays]
-	}
-	rvolHistory := historyInputs
-	if len(rvolHistory) > indicators.RvolHistoryDays {
-		rvolHistory = rvolHistory[:indicators.RvolHistoryDays]
-	}
-
-	prevClose := 0.0
-	if prevSeries.Length() > 0 {
-		prevClose = prevSeries.Bars[len(prevSeries.Bars)-1].Close
-	}
-
-	currentInput := indicators.SessionVolatilityInput{Series: currentSeries, PrevClose: prevClose}
-	return indicators.CalculateVolatility(currentInput, atrHistory, rvolHistory)
-}
-
-func (s *Service) computeLiquidity(ctx context.Context, securityInfo moex.SecurityInfo, series mainSessionSeries, trades []moex.Trade) (indicators.LiquidityMetrics, error) {
-	return indicators.CalculateLiquidity(series, trades, securityInfo)
-}
-
-func (s *Service) loadHistoricalSeries(ctx context.Context, tickerCfg models.TickerInfo, securityInfo moex.SecurityInfo, before time.Time, limit int) ([]indicators.SessionVolatilityInput, error) {
-	result := make([]indicators.SessionVolatilityInput, 0, limit)
-	date := before.AddDate(0, 0, -1)
-	attempts := 0
-	maxAttempts := limit * 6
-	for len(result) < limit && attempts < maxAttempts {
-		attempts++
-		row, err := s.moexClient.GetHistoryRow(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
-		if err != nil {
-			return nil, fmt.Errorf("history row %s: %w", date.Format("2006-01-02"), err)
-		}
-		if row == nil || row.Volume <= 0 {
-			date = date.AddDate(0, 0, -1)
-			continue
-		}
-
-		series, closePrice, err := s.loadSeriesForDate(ctx, tickerCfg, securityInfo, date, row.Close)
-		if err != nil {
-			date = date.AddDate(0, 0, -1)
-			continue
-		}
-		result = append(result, indicators.SessionVolatilityInput{Series: series, PrevClose: closePrice})
-		date = date.AddDate(0, 0, -1)
-	}
-	return result, nil
-}
-
-func (s *Service) loadSeriesForDate(ctx context.Context, tickerCfg models.TickerInfo, securityInfo moex.SecurityInfo, date time.Time, prevClose float64) (mainSessionSeries, float64, error) {
-	intervals, err := s.moexClient.GetBoardSessions(ctx, tickerCfg.BoardID, date)
-	if err != nil {
-		return mainSessionSeries{}, 0, err
-	}
-	schedule, err := resolveSessionSchedule(intervals)
-	if err != nil {
-		return mainSessionSeries{}, 0, err
-	}
-	candles, err := s.moexClient.GetMinuteCandles(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
-	if err != nil {
-		return mainSessionSeries{}, 0, err
-	}
-	series, err := buildMinuteSeries(candles, schedule, priceFallbacks{PrevSessionClose: prevClose}, securityInfo.LotSize)
-	if err != nil {
-		return mainSessionSeries{}, 0, err
-	}
-	closePrice := prevClose
-	if series.Length() > 0 {
-		closePrice = series.Bars[len(series.Bars)-1].Close
-	}
-	return series, closePrice, nil
 }
 
 func (s *Service) finalizeAndInsertPending(ctx context.Context, pending []pendingRecord) (int, error) {
@@ -391,9 +308,9 @@ func (s *Service) finalizeAndInsertPending(ctx context.Context, pending []pendin
 	}
 
 	for _, records := range grouped {
-		applyFlatTrendNormalization(records)
-		applyLiquidityNormalization(records)
-		applyVolatilityAssignment(records)
+		assignFlatTrendScore(records)
+		applyLiquidityScore(records)
+		assignVolatilityScore(records)
 	}
 
 	created := 0
@@ -407,37 +324,19 @@ func (s *Service) finalizeAndInsertPending(ctx context.Context, pending []pendin
 	return created, nil
 }
 
-func applyFlatTrendNormalization(records []*pendingRecord) {
-	type item struct {
-		rec *pendingRecord
-		cmp *indicators.FlatTrendComponents
-	}
-
-	var items []item
+func assignFlatTrendScore(records []*pendingRecord) {
 	for _, record := range records {
 		if record.raw.FlatTrend == nil {
 			continue
 		}
-		items = append(items, item{rec: record, cmp: record.raw.FlatTrend})
-	}
-	if len(items) == 0 {
-		return
-	}
-
-	comps := make([]indicators.FlatTrendComponents, len(items))
-	for i, it := range items {
-		comps[i] = *it.cmp
-	}
-	normalized := indicators.NormalizeFlatTrend(comps)
-	for i, it := range items {
-		it.rec.entity.FlatTrendFilter = formatFloat(normalized[i])
+		record.entity.FlatTrendFilter = formatFloat(*record.raw.FlatTrend)
 	}
 }
 
-func applyLiquidityNormalization(records []*pendingRecord) {
+func applyLiquidityScore(records []*pendingRecord) {
 	type item struct {
-		rec *pendingRecord
-		cmp *indicators.LiquidityMetrics
+		rec    *pendingRecord
+		metric *indicators.LiquidityMetrics
 	}
 
 	var items []item
@@ -445,28 +344,32 @@ func applyLiquidityNormalization(records []*pendingRecord) {
 		if record.raw.Liquidity == nil {
 			continue
 		}
-		items = append(items, item{rec: record, cmp: record.raw.Liquidity})
+		items = append(items, item{rec: record, metric: record.raw.Liquidity})
 	}
 	if len(items) == 0 {
 		return
 	}
 
-	metrics := make([]indicators.LiquidityMetrics, len(items))
+	values := make([]float64, len(items))
 	for i, it := range items {
-		metrics[i] = *it.cmp
+		values[i] = it.metric.LogLiquidity
 	}
-	normalized := indicators.NormalizeLiquidity(metrics)
+	scores := indicators.CrossSectionScore(values)
 	for i, it := range items {
-		it.rec.entity.Liquidity = formatFloat(normalized[i])
+		score := scores[i]
+		if math.IsNaN(score) {
+			continue
+		}
+		it.rec.entity.Liquidity = formatFloat(score)
 	}
 }
 
-func applyVolatilityAssignment(records []*pendingRecord) {
+func assignVolatilityScore(records []*pendingRecord) {
 	for _, record := range records {
 		if record.raw.Volatility == nil {
 			continue
 		}
-		record.entity.Volatility = formatFloat(record.raw.Volatility.Value)
+		record.entity.Volatility = formatFloat(*record.raw.Volatility)
 	}
 }
 
