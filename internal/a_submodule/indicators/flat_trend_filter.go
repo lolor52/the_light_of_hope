@@ -1,4 +1,4 @@
-package tickers_filling
+package indicators
 
 import (
 	"errors"
@@ -10,21 +10,21 @@ const (
 	vwapSlopeWindow  = 10
 )
 
-type flatTrendComponents struct {
-	overlapPercent float64
-	slopeAbs       float64
-	skewPercent    float64
+type FlatTrendComponents struct {
+	OverlapPercent float64
+	SlopeAbs       float64
+	SkewPercent    float64
 }
 
-func calculateFlatTrendComponents(currentSeries, prevSeries mainSessionSeries) (flatTrendComponents, error) {
-	if currentSeries.length() == 0 {
-		return flatTrendComponents{}, errors.New("empty current series for flat trend filter")
+func CalculateFlatTrendComponents(currentSeries, prevSeries SessionSeries) (FlatTrendComponents, error) {
+	if currentSeries.Length() == 0 {
+		return FlatTrendComponents{}, errors.New("empty current series for flat trend filter")
 	}
-	if prevSeries.length() == 0 {
-		return flatTrendComponents{}, errors.New("empty previous series for flat trend filter")
+	if prevSeries.Length() == 0 {
+		return FlatTrendComponents{}, errors.New("empty previous series for flat trend filter")
 	}
 
-	values, volumes := currentSeries.cumulativeValues()
+	values, volumes := currentSeries.CumulativeValues()
 	lastIndex := len(values) - 1
 	slope := math.NaN()
 	if lastIndex >= vwapSlopeWindow {
@@ -34,8 +34,8 @@ func calculateFlatTrendComponents(currentSeries, prevSeries mainSessionSeries) (
 		slope = math.Abs((vwapLast - vwapPrev) / (vwapPrev + flatTrendEpsilon) * 100)
 	}
 
-	currentHigh, currentLow := currentSeries.sessionExtremes()
-	prevHigh, prevLow := prevSeries.sessionExtremes()
+	currentHigh, currentLow := currentSeries.SessionExtremes()
+	prevHigh, prevLow := prevSeries.SessionExtremes()
 
 	overlapWidth := math.Max(0, math.Min(currentHigh, prevHigh)-math.Max(currentLow, prevLow))
 	unionWidth := math.Max(currentHigh, prevHigh) - math.Min(currentLow, prevLow)
@@ -44,8 +44,7 @@ func calculateFlatTrendComponents(currentSeries, prevSeries mainSessionSeries) (
 		overlap = overlapWidth / (unionWidth + flatTrendEpsilon) * 100
 	}
 
-	valueSum, volumeSum, vwap := currentSeries.dailyAggregates()
-	_ = valueSum
+	_, _, vwap := currentSeries.DailyAggregates()
 	dayRange := currentHigh - currentLow
 	skew := math.NaN()
 	if dayRange > 0 {
@@ -53,14 +52,14 @@ func calculateFlatTrendComponents(currentSeries, prevSeries mainSessionSeries) (
 		skew = math.Abs(vwap-mid) / (dayRange + flatTrendEpsilon) * 100
 	}
 
-	return flatTrendComponents{
-		overlapPercent: overlap,
-		slopeAbs:       slope,
-		skewPercent:    skew,
+	return FlatTrendComponents{
+		OverlapPercent: overlap,
+		SlopeAbs:       slope,
+		SkewPercent:    skew,
 	}, nil
 }
 
-func normalizeFlatTrend(items []flatTrendComponents) []float64 {
+func NormalizeFlatTrend(items []FlatTrendComponents) []float64 {
 	if len(items) == 0 {
 		return nil
 	}
@@ -68,9 +67,9 @@ func normalizeFlatTrend(items []flatTrendComponents) []float64 {
 	slopes := make([]float64, len(items))
 	skews := make([]float64, len(items))
 	for i, item := range items {
-		overlaps[i] = item.overlapPercent
-		slopes[i] = item.slopeAbs
-		skews[i] = item.skewPercent
+		overlaps[i] = item.OverlapPercent
+		slopes[i] = item.SlopeAbs
+		skews[i] = item.SkewPercent
 	}
 
 	overlapNorm := normalizeUp(overlaps)
@@ -79,19 +78,12 @@ func normalizeFlatTrend(items []flatTrendComponents) []float64 {
 
 	result := make([]float64, len(items))
 	for i := range items {
-		ov := safeValue(overlapNorm[i])
-		sl := safeValue(slopeNorm[i])
-		sk := safeValue(skewNorm[i])
+		ov := SafeValue(overlapNorm[i])
+		sl := SafeValue(slopeNorm[i])
+		sk := SafeValue(skewNorm[i])
 		result[i] = 100 * (0.5*ov + 0.3*sl + 0.2*sk)
 	}
 	return result
-}
-
-func safeValue(value float64) float64 {
-	if math.IsNaN(value) {
-		return 0.5
-	}
-	return value
 }
 
 func normalizeUp(values []float64) []float64 {
@@ -105,7 +97,7 @@ func normalizeUp(values []float64) []float64 {
 			result[i] = math.NaN()
 			continue
 		}
-		result[i] = clip((value-minVal)/(maxVal-minVal+flatTrendEpsilon), 0, 1)
+		result[i] = Clip((value-minVal)/(maxVal-minVal+flatTrendEpsilon), 0, 1)
 	}
 	return result
 }
@@ -121,7 +113,7 @@ func normalizeDown(values []float64) []float64 {
 			result[i] = math.NaN()
 			continue
 		}
-		up := clip((value-minVal)/(maxVal-minVal+flatTrendEpsilon), 0, 1)
+		up := Clip((value-minVal)/(maxVal-minVal+flatTrendEpsilon), 0, 1)
 		result[i] = 1 - up
 	}
 	return result
@@ -137,8 +129,8 @@ func normalizationBounds(values []float64) (float64, float64) {
 	if len(finite) == 0 {
 		return 0, 0
 	}
-	minVal := minFloat(finite)
-	maxVal := maxFloat(finite)
+	minVal := MinFloat(finite)
+	maxVal := MaxFloat(finite)
 	if maxVal == minVal {
 		if minVal == 0 {
 			return 0, 1

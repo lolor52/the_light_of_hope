@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	indicators "invest_intraday/internal/a_submodule/indicators"
 	"invest_intraday/internal/a_submodule/moex"
 )
 
@@ -20,20 +21,9 @@ type sessionSchedule struct {
 	AuctionCloseEnd   *time.Time
 }
 
-type minuteBar struct {
-	Time   time.Time
-	Open   float64
-	High   float64
-	Low    float64
-	Close  float64
-	Volume float64
-	Value  float64
-	Active bool
-}
+type minuteBar = indicators.MinuteBar
 
-type mainSessionSeries struct {
-	Bars []minuteBar
-}
+type mainSessionSeries = indicators.SessionSeries
 
 type priceFallbacks struct {
 	PrevSessionClose float64
@@ -221,232 +211,12 @@ func fallbackPrice(value, defaultValue float64) float64 {
 	return defaultValue
 }
 
-func sum(values []float64) float64 {
-	var total float64
-	for _, v := range values {
-		total += v
-	}
-	return total
-}
-
-func median(values []float64) float64 {
-	if len(values) == 0 {
-		return math.NaN()
-	}
-	sorted := make([]float64, len(values))
-	copy(sorted, values)
-	sort.Float64s(sorted)
-	mid := len(sorted) / 2
-	if len(sorted)%2 == 1 {
-		return sorted[mid]
-	}
-	return 0.5 * (sorted[mid-1] + sorted[mid])
-}
-
-func quantile(values []float64, q float64) float64 {
-	if len(values) == 0 {
-		return math.NaN()
-	}
-	if q <= 0 {
-		return minFloat(values)
-	}
-	if q >= 1 {
-		return maxFloat(values)
-	}
-	sorted := make([]float64, len(values))
-	copy(sorted, values)
-	sort.Float64s(sorted)
-	pos := q * float64(len(sorted)-1)
-	lower := int(math.Floor(pos))
-	upper := int(math.Ceil(pos))
-	if lower == upper {
-		return sorted[lower]
-	}
-	weight := pos - float64(lower)
-	return sorted[lower]*(1-weight) + sorted[upper]*weight
-}
-
-func clip(value, minValue, maxValue float64) float64 {
-	if value < minValue {
-		return minValue
-	}
-	if value > maxValue {
-		return maxValue
-	}
-	return value
-}
-
-func minFloat(values []float64) float64 {
-	if len(values) == 0 {
-		return math.NaN()
-	}
-	minVal := values[0]
-	for _, v := range values[1:] {
-		if v < minVal {
-			minVal = v
-		}
-	}
-	return minVal
-}
-
-func maxFloat(values []float64) float64 {
-	if len(values) == 0 {
-		return math.NaN()
-	}
-	maxVal := values[0]
-	for _, v := range values[1:] {
-		if v > maxVal {
-			maxVal = v
-		}
-	}
-	return maxVal
-}
-
-func mean(values []float64) float64 {
-	if len(values) == 0 {
-		return math.NaN()
-	}
-	return sum(values) / float64(len(values))
-}
-
-func (series mainSessionSeries) activeValues(fn func(minuteBar) (float64, bool)) []float64 {
-	result := make([]float64, 0, len(series.Bars))
-	for _, bar := range series.Bars {
-		if !bar.Active {
-			continue
-		}
-		if value, ok := fn(bar); ok {
-			result = append(result, value)
-		}
-	}
-	return result
-}
-
-func (series mainSessionSeries) totalValue() float64 {
-	total := 0.0
-	for _, bar := range series.Bars {
-		total += bar.Value
-	}
-	return total
-}
-
-func (series mainSessionSeries) activeCount() int {
-	count := 0
-	for _, bar := range series.Bars {
-		if bar.Active {
-			count++
-		}
-	}
-	return count
-}
-
-func (series mainSessionSeries) length() int {
-	return len(series.Bars)
-}
-
-func (series mainSessionSeries) sessionExtremes() (float64, float64) {
-	high := math.Inf(-1)
-	low := math.Inf(1)
-	for _, bar := range series.Bars {
-		if bar.High > high {
-			high = bar.High
-		}
-		if bar.Low < low {
-			low = bar.Low
-		}
-	}
-	return high, low
-}
-
-func (series mainSessionSeries) cumulativeValues() ([]float64, []float64) {
-	values := make([]float64, len(series.Bars))
-	volumes := make([]float64, len(series.Bars))
-	for i, bar := range series.Bars {
-		values[i] = bar.Value
-		volumes[i] = bar.Volume
-		if i > 0 {
-			values[i] += values[i-1]
-			volumes[i] += volumes[i-1]
-		}
-	}
-	return values, volumes
-}
-
-func (series mainSessionSeries) closes() []float64 {
-	closes := make([]float64, len(series.Bars))
-	for i, bar := range series.Bars {
-		closes[i] = bar.Close
-	}
-	return closes
-}
-
-func (series mainSessionSeries) volumes() []float64 {
-	volumes := make([]float64, len(series.Bars))
-	for i, bar := range series.Bars {
-		volumes[i] = bar.Volume
-	}
-	return volumes
-}
-
-func (series mainSessionSeries) values() []float64 {
-	vals := make([]float64, len(series.Bars))
-	for i, bar := range series.Bars {
-		vals[i] = bar.Value
-	}
-	return vals
-}
-
-func (series mainSessionSeries) logReturns() []float64 {
-	results := make([]float64, len(series.Bars))
-	prevClose := math.NaN()
-	for i, bar := range series.Bars {
-		if i == 0 {
-			results[i] = math.NaN()
-			prevClose = bar.Close
-			continue
-		}
-		if bar.Close <= 0 || prevClose <= 0 {
-			results[i] = math.NaN()
-		} else {
-			results[i] = math.Abs(math.Log(bar.Close / prevClose))
-		}
-		prevClose = bar.Close
-	}
-	return results
-}
-
-func (series mainSessionSeries) priceRef() float64 {
-	closes := make([]float64, 0, len(series.Bars))
-	for _, bar := range series.Bars {
-		if bar.Active {
-			closes = append(closes, bar.Close)
-		}
-	}
-	return median(closes)
-}
-
-func (series mainSessionSeries) dailyAggregates() (valueSum, volumeSum float64, vwap float64) {
-	for _, bar := range series.Bars {
-		valueSum += bar.Value
-		volumeSum += bar.Volume
-	}
-	if volumeSum > 0 {
-		vwap = valueSum / volumeSum
-	}
-	return
-}
-
 func calculateVWAP(series mainSessionSeries) (float64, error) {
-	totalValue := 0.0
-	totalVolume := 0.0
-	for _, bar := range series.Bars {
-		totalValue += bar.Value
-		totalVolume += bar.Volume
-	}
-	if totalVolume <= 0 {
+	_, volumeSum, vwap := series.DailyAggregates()
+	if volumeSum <= 0 {
 		return 0, errors.New("zero volume for VWAP")
 	}
-	return totalValue / totalVolume, nil
+	return vwap, nil
 }
 
 func calculateValueArea(series mainSessionSeries, minStep float64) (valueAreaResult, error) {
