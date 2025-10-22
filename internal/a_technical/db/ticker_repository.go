@@ -10,7 +10,7 @@ import (
 	"invest_intraday/models"
 )
 
-// TickerRepository инкапсулирует операции с таблицей ticker.
+// TickerRepository инкапсулирует операции с таблицей ticker_history.
 type TickerRepository struct {
 	db *sql.DB
 }
@@ -21,7 +21,7 @@ func NewTickerRepository(db *sql.DB) *TickerRepository {
 }
 
 // ErrNotFound возвращается, если запись для тикера и даты отсутствует.
-var ErrNotFound = errors.New("ticker entry not found")
+var ErrNotFound = errors.New("ticker_history entry not found")
 
 // GetByDateAndName ищет запись по имени тикера и дате торговой сессии.
 func (r *TickerRepository) GetByDateAndName(ctx context.Context, name string, sessionDate time.Time) (models.Ticker, error) {
@@ -37,7 +37,7 @@ SELECT trading_session_date,
        liquidity,
        volatility,
        flat_trend_filter
-  FROM ticker
+  FROM ticker_history
  WHERE ticker_name = $1
    AND trading_session_date = $2
 `
@@ -60,7 +60,7 @@ SELECT trading_session_date,
 		return models.Ticker{}, ErrNotFound
 	}
 	if err != nil {
-		return models.Ticker{}, fmt.Errorf("select ticker: %w", err)
+		return models.Ticker{}, fmt.Errorf("select ticker_history: %w", err)
 	}
 
 	return entity, nil
@@ -69,7 +69,7 @@ SELECT trading_session_date,
 // Insert добавляет новую запись о торговой сессии тикера.
 func (r *TickerRepository) Insert(ctx context.Context, entity models.Ticker) error {
 	const query = `
-INSERT INTO ticker (
+INSERT INTO ticker_history (
     trading_session_date,
     trading_session_active,
     ticker_name,
@@ -98,7 +98,7 @@ INSERT INTO ticker (
 		entity.FlatTrendFilter,
 	)
 	if err != nil {
-		return fmt.Errorf("insert ticker: %w", err)
+		return fmt.Errorf("insert ticker_history: %w", err)
 	}
 
 	return nil
@@ -122,7 +122,7 @@ SELECT trading_session_date,
        liquidity,
        volatility,
        flat_trend_filter
-  FROM ticker
+  FROM ticker_history
  WHERE ticker_name = $1
    AND trading_session_active = true
  ORDER BY trading_session_date DESC
@@ -131,7 +131,7 @@ SELECT trading_session_date,
 
 	rows, err := r.db.QueryContext(ctx, query, name, limit)
 	if err != nil {
-		return nil, fmt.Errorf("list ticker sessions: %w", err)
+		return nil, fmt.Errorf("list ticker_history sessions: %w", err)
 	}
 	defer rows.Close()
 
@@ -151,13 +151,13 @@ SELECT trading_session_date,
 			&entity.Volatility,
 			&entity.FlatTrendFilter,
 		); err != nil {
-			return nil, fmt.Errorf("scan ticker session: %w", err)
+			return nil, fmt.Errorf("scan ticker_history session: %w", err)
 		}
 		sessions = append(sessions, entity)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate ticker sessions: %w", err)
+		return nil, fmt.Errorf("iterate ticker_history sessions: %w", err)
 	}
 
 	for i, j := 0, len(sessions)-1; i < j; i, j = i+1, j-1 {

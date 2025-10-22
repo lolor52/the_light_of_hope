@@ -16,7 +16,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// Service отвечает за заполнение таблицы ticker историческими данными.
+// Service отвечает за заполнение таблицы ticker_history историческими данными.
 type Service struct {
 	cfg         config.Config
 	repo        *db.TickerRepository
@@ -76,7 +76,7 @@ func (s *Service) Close() error {
 	return nil
 }
 
-// Run запускает процесс заполнения таблицы ticker.
+// Run запускает процесс заполнения таблицы ticker_history.
 func (s *Service) Run(ctx context.Context) (RunStats, error) {
 	var stats RunStats
 	var pending []pendingRecord
