@@ -22,7 +22,7 @@
 - `internal/a_submodule/session`, `internal/a_submodule/variable`, `internal/a_submodule/vah_gt_vwap_gt_val`: заготовки под дальнейшую логику торговых сессий и расчёты переменных/условия VAH > VWAP > VAL.
 - `internal/a_technical/config`: функции загрузки JSON-конфигурации с параметрами MOEX Passport, списком тикеров и строкой подключения к БД.
 - `internal/a_technical/db`: репозиторий `TickerRepository` для поиска и вставки записей о тикерах в `ticker_history`.
-- `models`: структуры предметной области; `models.Ticker` хранит рассчитанные метрики торговой сессии для записи в БД.
+- `models`: структуры предметной области; `models.TickerHistory` представляет расчётные метрики торговых сессий, `models.TickerInfo` хранит справочные данные тикеров, `models.OrderPrice` описывает уровни входа заявок.
 
 ## Дополнительная документация
 - Формулы расчёта метрик отбора тикеров описаны в `docs/formulas_tickers_selection.md`.
