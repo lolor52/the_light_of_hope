@@ -10,7 +10,7 @@ import (
 	"invest_intraday/models"
 )
 
-// TickerRepository инкапсулирует операции с таблицей ticker.
+// TickerRepository инкапсулирует операции с таблицей ticker_history.
 type TickerRepository struct {
 	db *sql.DB
 }
@@ -37,7 +37,7 @@ SELECT trading_session_date,
        liquidity,
        volatility,
        flat_trend_filter
-  FROM ticker
+  FROM ticker_history
  WHERE ticker_name = $1
    AND trading_session_date = $2
 `
@@ -69,7 +69,7 @@ SELECT trading_session_date,
 // Insert добавляет новую запись о торговой сессии тикера.
 func (r *TickerRepository) Insert(ctx context.Context, entity models.Ticker) error {
 	const query = `
-INSERT INTO ticker (
+INSERT INTO ticker_history (
     trading_session_date,
     trading_session_active,
     ticker_name,
@@ -98,7 +98,7 @@ INSERT INTO ticker (
 		entity.FlatTrendFilter,
 	)
 	if err != nil {
-		return fmt.Errorf("insert ticker: %w", err)
+		return fmt.Errorf("insert ticker_history: %w", err)
 	}
 
 	return nil
@@ -122,7 +122,7 @@ SELECT trading_session_date,
        liquidity,
        volatility,
        flat_trend_filter
-  FROM ticker
+  FROM ticker_history
  WHERE ticker_name = $1
    AND trading_session_active = true
  ORDER BY trading_session_date DESC
