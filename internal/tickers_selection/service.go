@@ -192,7 +192,7 @@ type sessionMetrics struct {
 	FlatTrend  float64
 }
 
-func buildSessionMetrics(sessions []models.Ticker) ([]sessionMetrics, error) {
+func buildSessionMetrics(sessions []models.TickerHistory) ([]sessionMetrics, error) {
 	metrics := make([]sessionMetrics, 0, len(sessions))
 	for _, session := range sessions {
 		vah, err := parseMetric(session.VAH, "VAH")

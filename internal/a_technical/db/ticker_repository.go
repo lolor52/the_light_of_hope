@@ -24,9 +24,10 @@ func NewTickerRepository(db *sql.DB) *TickerRepository {
 var ErrNotFound = errors.New("ticker_history entry not found")
 
 // GetByDateAndName ищет запись по имени тикера и дате торговой сессии.
-func (r *TickerRepository) GetByDateAndName(ctx context.Context, name string, sessionDate time.Time) (models.Ticker, error) {
+func (r *TickerRepository) GetByDateAndName(ctx context.Context, name string, sessionDate time.Time) (models.TickerHistory, error) {
 	const query = `
-SELECT trading_session_date,
+SELECT id,
+       trading_session_date,
        trading_session_active,
        ticker_name,
        secid,
@@ -42,8 +43,9 @@ SELECT trading_session_date,
    AND trading_session_date = $2
 `
 
-	var entity models.Ticker
+	var entity models.TickerHistory
 	err := r.db.QueryRowContext(ctx, query, name, sessionDate).Scan(
+		&entity.ID,
 		&entity.TradingSessionDate,
 		&entity.TradingSessionActive,
 		&entity.TickerName,
@@ -57,17 +59,17 @@ SELECT trading_session_date,
 		&entity.FlatTrendFilter,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return models.Ticker{}, ErrNotFound
+		return models.TickerHistory{}, ErrNotFound
 	}
 	if err != nil {
-		return models.Ticker{}, fmt.Errorf("select ticker_history: %w", err)
+		return models.TickerHistory{}, fmt.Errorf("select ticker_history: %w", err)
 	}
 
 	return entity, nil
 }
 
 // Insert добавляет новую запись о торговой сессии тикера.
-func (r *TickerRepository) Insert(ctx context.Context, entity models.Ticker) error {
+func (r *TickerRepository) Insert(ctx context.Context, entity models.TickerHistory) error {
 	const query = `
 INSERT INTO ticker_history (
     trading_session_date,
@@ -105,13 +107,14 @@ INSERT INTO ticker_history (
 }
 
 // ListLastActiveSessions возвращает последние активные торговые сессии указанного тикера.
-func (r *TickerRepository) ListLastActiveSessions(ctx context.Context, name string, limit int) ([]models.Ticker, error) {
+func (r *TickerRepository) ListLastActiveSessions(ctx context.Context, name string, limit int) ([]models.TickerHistory, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
 
 	const query = `
-SELECT trading_session_date,
+SELECT id,
+       trading_session_date,
        trading_session_active,
        ticker_name,
        secid,
@@ -135,10 +138,11 @@ SELECT trading_session_date,
 	}
 	defer rows.Close()
 
-	sessions := make([]models.Ticker, 0, limit)
+	sessions := make([]models.TickerHistory, 0, limit)
 	for rows.Next() {
-		var entity models.Ticker
+		var entity models.TickerHistory
 		if err := rows.Scan(
+			&entity.ID,
 			&entity.TradingSessionDate,
 			&entity.TradingSessionActive,
 			&entity.TickerName,

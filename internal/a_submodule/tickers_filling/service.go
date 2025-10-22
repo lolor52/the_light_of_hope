@@ -168,7 +168,7 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 
 		if !sessionActive {
 			if errors.Is(err, db.ErrNotFound) {
-				entity := models.Ticker{
+				entity := models.TickerHistory{
 					TradingSessionDate:   date,
 					TradingSessionActive: false,
 					TickerName:           tickerCfg.Ticker,
@@ -195,7 +195,7 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg config.MOEXTicker
 			log.Printf("tickers_filling: не удалось рассчитать метрики для %s %s: %v", tickerCfg.Ticker, date.Format("2006-01-02"), err)
 		}
 
-		entity := models.Ticker{
+		entity := models.TickerHistory{
 			TradingSessionDate:   date,
 			TradingSessionActive: true,
 			TickerName:           tickerCfg.Ticker,
@@ -224,7 +224,7 @@ type sessionRawMetrics struct {
 }
 
 type pendingRecord struct {
-	entity models.Ticker
+	entity models.TickerHistory
 	raw    sessionRawMetrics
 }
 
