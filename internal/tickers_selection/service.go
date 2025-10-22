@@ -55,6 +55,7 @@ type RunResult struct {
 type Service struct {
 	cfg  config.Config
 	repo *db.TickerRepository
+	info *db.TickerInfoRepository
 	db   *sql.DB
 }
 
@@ -77,6 +78,7 @@ func NewService(ctx context.Context, cfg config.Config) (*Service, error) {
 	service := &Service{
 		cfg:  cfg,
 		repo: db.NewTickerRepository(dbConn),
+		info: db.NewTickerInfoRepository(dbConn),
 		db:   dbConn,
 	}
 
@@ -122,31 +124,36 @@ func (s *Service) selectTickers(ctx context.Context) ([]Result, error) {
 		selectionCount = 4
 	}
 
-	results := make([]Result, 0, len(s.cfg.MOEXTickers))
-	for _, tickerCfg := range s.cfg.MOEXTickers {
-		sessions, err := s.repo.ListLastActiveSessions(ctx, tickerCfg.Ticker, requiredSessions)
+	tickerInfos, err := s.info.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load ticker info: %w", err)
+	}
+
+	results := make([]Result, 0, len(tickerInfos))
+	for _, tickerInfo := range tickerInfos {
+		sessions, err := s.repo.ListLastActiveSessions(ctx, tickerInfo.TickerName, requiredSessions)
 		if err != nil {
-			return nil, fmt.Errorf("load sessions for %s: %w", tickerCfg.Ticker, err)
+			return nil, fmt.Errorf("load sessions for %s: %w", tickerInfo.TickerName, err)
 		}
 		if len(sessions) < requiredSessions {
-			log.Printf("tickers_selection: недостаточно активных сессий для %s: %d/%d", tickerCfg.Ticker, len(sessions), requiredSessions)
+			log.Printf("tickers_selection: недостаточно активных сессий для %s: %d/%d", tickerInfo.TickerName, len(sessions), requiredSessions)
 			continue
 		}
 
 		metrics, err := buildSessionMetrics(sessions)
 		if err != nil {
-			log.Printf("tickers_selection: пропуск %s: %v", tickerCfg.Ticker, err)
+			log.Printf("tickers_selection: пропуск %s: %v", tickerInfo.TickerName, err)
 			continue
 		}
 
 		scores, err := calculateScores(metrics)
 		if err != nil {
-			log.Printf("tickers_selection: ошибка расчёта для %s: %v", tickerCfg.Ticker, err)
+			log.Printf("tickers_selection: ошибка расчёта для %s: %v", tickerInfo.TickerName, err)
 			continue
 		}
 
 		results = append(results, Result{
-			Ticker:             tickerCfg.Ticker,
+			Ticker:             tickerInfo.TickerName,
 			Regime:             scores.Regime,
 			FinalScore:         scores.FinalScore,
 			MeanReversionScore: scores.MeanReversionScore,
