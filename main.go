@@ -8,6 +8,7 @@ import (
 
 	"invest_intraday/internal/a_submodule/tickers_filling"
 	"invest_intraday/internal/a_technical/config"
+	"invest_intraday/internal/tickers_selection"
 )
 
 func main() {
@@ -21,10 +22,9 @@ func main() {
 		log.Fatalf("загрузка конфигурации: %v", err)
 	}
 
-	handler := tickers_filling.NewHTTPHandler(cfg)
-
 	mux := http.NewServeMux()
-	mux.Handle("/tickers_filling", handler)
+	mux.Handle("/tickers_filling", tickers_filling.NewHTTPHandler(cfg))
+	mux.Handle("/tickers_selection", tickers_selection.NewHTTPHandler(cfg))
 
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {
