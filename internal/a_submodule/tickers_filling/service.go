@@ -149,30 +149,19 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 		default:
 		}
 
-		historyRow, err := s.moexClient.GetHistoryRow(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
-		if err != nil {
-			return stats, nil, fmt.Errorf("get history row: %w", err)
-		}
-
-		sessionActive := historyRow != nil && historyRow.Volume > 0
-
-		if sessionActive {
-			consecutiveInactiveDays = 0
-		} else if maxInactiveDays > 0 {
-			consecutiveInactiveDays++
-		}
-
-		_, err = s.repo.GetByDateAndName(ctx, tickerCfg.TickerName, date)
+		existing, err := s.repo.GetByDateAndName(ctx, tickerCfg.TickerName, date)
 		if err == nil {
 			stats.Existing++
-			if sessionActive {
+			if existing.TradingSessionActive {
 				tradingSessionsFound++
+				consecutiveInactiveDays = 0
+			} else if maxInactiveDays > 0 {
+				consecutiveInactiveDays++
+				if consecutiveInactiveDays >= maxInactiveDays {
+					log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.TickerName, maxInactiveDays)
+					return stats, pending, nil
+				}
 			}
-			if !sessionActive && maxInactiveDays > 0 && consecutiveInactiveDays >= maxInactiveDays {
-				log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.TickerName, maxInactiveDays)
-				return stats, pending, nil
-			}
-			// запись уже есть, перейдём к следующей дате
 			date = date.AddDate(0, 0, -1)
 			continue
 		}
@@ -180,43 +169,52 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 			return stats, nil, err
 		}
 
-		if !sessionActive {
-			if errors.Is(err, db.ErrNotFound) {
-				entity := models.TickerHistory{
-					TradingSessionDate:   date,
-					TradingSessionActive: false,
-					TickerInfoID:         tickerCfg.ID,
-				}
-				if insertErr := s.repo.Insert(ctx, entity); insertErr != nil {
-					return stats, nil, insertErr
-				}
-				stats.Created++
+		historyRow, err := s.moexClient.GetHistoryRow(ctx, tickerCfg.BoardID, tickerCfg.SecID, date)
+		if err != nil {
+			return stats, nil, fmt.Errorf("get history row: %w", err)
+		}
+
+		sessionActive := historyRow != nil && historyRow.Volume > 0
+		if sessionActive {
+			consecutiveInactiveDays = 0
+			tradingSessionsFound++
+
+			metrics, err := s.collectMetrics(ctx, tickerCfg, securityInfo, *historyRow)
+			if err != nil {
+				log.Printf("tickers_filling: не удалось рассчитать метрики для %s %s: %v", tickerCfg.TickerName, date.Format("2006-01-02"), err)
 			}
-			if maxInactiveDays > 0 && consecutiveInactiveDays >= maxInactiveDays {
-				log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.TickerName, maxInactiveDays)
-				return stats, pending, nil
+
+			entity := models.TickerHistory{
+				TradingSessionDate:   date,
+				TradingSessionActive: true,
+				TickerInfoID:         tickerCfg.ID,
+				VWAP:                 metrics.VWAP,
+				VAL:                  metrics.VAL,
+				VAH:                  metrics.VAH,
 			}
+
+			pending = append(pending, pendingRecord{entity: entity, raw: metrics})
 			date = date.AddDate(0, 0, -1)
 			continue
 		}
 
-		tradingSessionsFound++
-
-		metrics, err := s.collectMetrics(ctx, tickerCfg, securityInfo, *historyRow)
-		if err != nil {
-			log.Printf("tickers_filling: не удалось рассчитать метрики для %s %s: %v", tickerCfg.TickerName, date.Format("2006-01-02"), err)
+		if maxInactiveDays > 0 {
+			consecutiveInactiveDays++
+			if consecutiveInactiveDays >= maxInactiveDays {
+				log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.TickerName, maxInactiveDays)
+				return stats, pending, nil
+			}
 		}
 
 		entity := models.TickerHistory{
 			TradingSessionDate:   date,
-			TradingSessionActive: true,
+			TradingSessionActive: false,
 			TickerInfoID:         tickerCfg.ID,
-			VWAP:                 metrics.VWAP,
-			VAL:                  metrics.VAL,
-			VAH:                  metrics.VAH,
 		}
-
-		pending = append(pending, pendingRecord{entity: entity, raw: metrics})
+		if insertErr := s.repo.Insert(ctx, entity); insertErr != nil {
+			return stats, nil, insertErr
+		}
+		stats.Created++
 
 		date = date.AddDate(0, 0, -1)
 	}
