@@ -12,7 +12,7 @@ S       = множество тикеров для кросс-нормировк
 ```
 > Все вычисления в часовом поясе MSK (UTC+3).
 
-## Используемые ресурсы MOEX ISS
+## Используемые ресурсы
 - `.../engines/<engine>/markets/<market>/boards/<board>/securities/<SECID>.json?iss.only=securities` — справочник (в т.ч. `LOTSIZE`, `MINSTEP`, валюта расчёта).
 - `.../engines/<engine>/markets/<market>/boards/<board>/securities/<SECID>/candles.json?from=DATE&to=DATE&interval=1` — минутные свечи основной даты.
 - `.../engines/<engine>/markets/<market>/boards/<board>/securities/<SECID>/trades.json?date=DATE` — тиковые сделки за дату.
@@ -90,7 +90,7 @@ L = round( 100 * clip(L_raw, 0, 1), 2 )
 - Все импутации и флаги фиксировать в отчёте: размеры выборок, `|M_act|/|M|`, наличие `flat_quantiles`, `small_peer_set`, `roll_from_candles`, доля винзорированных минут в `DepthProxy`.
 
 ## Проверка соответствия ограничениям
-- Основным источником данных является MOEX ISS (`candles`, `trades`, `securities`, `sessions/schedule`). Данные стакана и сторонние поставщики не используются.
+- В расчётах учитываются данные основной сессии (`candles`, `trades`, `securities`, `sessions/schedule`) с корректным фильтром по расписанию и борду.
 - Пустые минуты корректно представлены в гриде `M` и **не завышают** метрики.
 - Нормировки устойчивы при `P5==P95`.
 - Прокси глубины устойчива к малым ретёрнам.
