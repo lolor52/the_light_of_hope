@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -43,6 +45,8 @@ func (c *Client) getJSON(ctx context.Context, endpoint string, query url.Values,
 		req.URL.RawQuery = query.Encode()
 	}
 
+	log.Printf("tickers_filling: запрос к MOEX ISS: %s %s", req.Method, req.URL.String())
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("do request: %w", err)
@@ -53,8 +57,14 @@ func (c *Client) getJSON(ctx context.Context, endpoint string, query url.Values,
 		return fmt.Errorf("request unexpected status: %s", resp.Status)
 	}
 
-	decoder := json.NewDecoder(resp.Body)
-	if err := decoder.Decode(target); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
+
+	log.Printf("tickers_filling: ответ MOEX ISS (%s): %s", req.URL.String(), string(body))
+
+	if err := json.Unmarshal(body, target); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 
