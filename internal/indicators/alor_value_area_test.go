@@ -1,7 +1,11 @@
 package indicators
 
 import (
+	"context"
+	"errors"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -67,5 +71,55 @@ func TestMainSessionBounds(t *testing.T) {
 	}
 	if !end.Equal(expectedEnd) {
 		t.Fatalf("unexpected end: got %v, want %v", end, expectedEnd)
+	}
+}
+
+type stubTokenProvider struct {
+	token string
+	err   error
+}
+
+func (s stubTokenProvider) AccessToken(_ context.Context) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.token, nil
+}
+
+func TestMarketDataClientFetchTradesInvalidInstrument(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewMarketDataClient(server.URL, stubTokenProvider{token: "token"})
+	client.WithHTTPClient(server.Client())
+
+	_, err := client.FetchTrades(context.Background(), "TQBR", "BAD", time.Now().Add(-time.Hour), time.Now())
+	if !errors.Is(err, ErrInvalidInstrument) {
+		t.Fatalf("expected ErrInvalidInstrument, got %v", err)
+	}
+
+	if got := client.LastResponse(); got != "status 404 without body" {
+		t.Fatalf("unexpected last response: %q", got)
+	}
+}
+
+func TestMarketDataClientFetchTradesNoContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewMarketDataClient(server.URL, stubTokenProvider{token: "token"})
+	client.WithHTTPClient(server.Client())
+
+	_, err := client.FetchTrades(context.Background(), "TQBR", "EMPTY", time.Now().Add(-time.Hour), time.Now())
+	if !errors.Is(err, ErrNoTrades) {
+		t.Fatalf("expected ErrNoTrades, got %v", err)
+	}
+
+	if got := client.LastResponse(); got != "status 204 without body" {
+		t.Fatalf("unexpected last response: %q", got)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -252,9 +253,20 @@ func (c *Client) queryOrderBook(ctx context.Context, token string) (bool, bool, 
 		return false, false, errors.New("alor: empty access token")
 	}
 
-	endpoint := strings.TrimRight(c.env.APIURL, "/") + "/md/v2/orderbooks/MOEX/SBER?depth=1&format=Simple"
+	endpoint := strings.TrimRight(c.env.APIURL, "/") + "/md/v2/orderbooks/MOEX/SBER"
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	reqURL, err := url.Parse(endpoint)
+	if err != nil {
+		return false, false, fmt.Errorf("build orderbook url: %w", err)
+	}
+
+	query := reqURL.Query()
+	query.Set("depth", "1")
+	query.Set("format", "Simple")
+	query.Set("token", token)
+	reqURL.RawQuery = query.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), nil)
 	if err != nil {
 		return false, false, fmt.Errorf("create orderbook request: %w", err)
 	}
@@ -267,6 +279,8 @@ func (c *Client) queryOrderBook(ctx context.Context, token string) (bool, bool, 
 		return false, false, fmt.Errorf("request orderbook: %w", err)
 	}
 	defer resp.Body.Close()
+
+	log.Printf("alor: orderbook url=%s status=%d", req.URL.String(), resp.StatusCode)
 
 	switch resp.StatusCode {
 	case http.StatusOK:
