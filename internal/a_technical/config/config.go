@@ -11,7 +11,11 @@ import (
 
 // Config содержит параметры приложения, считываемые из JSON-файла.
 type Config struct {
-	DatabaseURL string `json:"DATABASE_URL"`
+	DatabaseURL                   string `json:"DATABASE_URL"`
+	AlorRefreshToken              string `json:"alor_refresh_token"`
+	TickersFillingSessions        int    `json:"tickers_filling_sessions"`
+	TickersFillingMaxInactiveDays int    `json:"tickers_filling_max_inactive_days"`
+	TickersSelectionCount         int    `json:"tickers_selection_count"`
 }
 
 // FromFile загружает конфигурацию из указанного JSON-файла.
