@@ -11,7 +11,14 @@ import (
 
 // Config содержит общие параметры приложения.
 type Config struct {
-        DatabaseURL string `json:"DATABASE_URL"`
+	DatabaseURL  string              `json:"DATABASE_URL"`
+	MoexPassport PassportCredentials `json:"moex_passport"`
+}
+
+// PassportCredentials описывают логин и пароль для MOEX Passport.
+type PassportCredentials struct {
+	Login    string `json:"login"`
+	Password string `json:"password"`
 }
 
 // FromFile загружает конфигурацию из указанного JSON-файла.
@@ -32,7 +39,7 @@ func FromFile(path string) (Config, error) {
 		return cfg, fmt.Errorf("decode config: %w", err)
 	}
 
-        return cfg, nil
+	return cfg, nil
 }
 
 func removeJSONComments(data []byte) ([]byte, error) {
