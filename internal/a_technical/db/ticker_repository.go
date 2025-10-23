@@ -33,9 +33,7 @@ SELECT th.id,
        th.vwap,
        th.val,
        th.vah,
-       th.liquidity,
-       th.volatility,
-       th.flat_trend_filter
+       th.swing_count_paired
   FROM ticker_history th
   JOIN ticker_info ti ON ti.id = th.ticker_info_id
  WHERE ti.ticker_name = $1
@@ -51,9 +49,7 @@ SELECT th.id,
 		&entity.VWAP,
 		&entity.VAL,
 		&entity.VAH,
-		&entity.Liquidity,
-		&entity.Volatility,
-		&entity.FlatTrendFilter,
+		&entity.SwingCountPaired,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.TickerHistory{}, ErrNotFound
@@ -75,10 +71,8 @@ INSERT INTO ticker_history (
     vwap,
     val,
     vah,
-    liquidity,
-    volatility,
-    flat_trend_filter
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    swing_count_paired
+) VALUES ($1,$2,$3,$4,$5,$6,$7)
 `
 
 	_, err := r.db.ExecContext(ctx, query,
@@ -88,9 +82,7 @@ INSERT INTO ticker_history (
 		entity.VWAP,
 		entity.VAL,
 		entity.VAH,
-		entity.Liquidity,
-		entity.Volatility,
-		entity.FlatTrendFilter,
+		entity.SwingCountPaired,
 	)
 	if err != nil {
 		return fmt.Errorf("insert ticker_history: %w", err)
@@ -113,9 +105,7 @@ SELECT th.id,
        th.vwap,
        th.val,
        th.vah,
-       th.liquidity,
-       th.volatility,
-       th.flat_trend_filter
+       th.swing_count_paired
   FROM ticker_history th
   JOIN ticker_info ti ON ti.id = th.ticker_info_id
  WHERE ti.ticker_name = $1
@@ -141,9 +131,7 @@ SELECT th.id,
 			&entity.VWAP,
 			&entity.VAL,
 			&entity.VAH,
-			&entity.Liquidity,
-			&entity.Volatility,
-			&entity.FlatTrendFilter,
+			&entity.SwingCountPaired,
 		); err != nil {
 			return nil, fmt.Errorf("scan ticker_history session: %w", err)
 		}
