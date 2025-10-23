@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -97,22 +98,35 @@ func (s *Service) Fill(ctx context.Context) (FillStats, error) {
 	var total FillStats
 
 	if s.config.SessionsTarget == 0 || s.config.MaxInactiveDays == 0 {
+		log.Printf("tickers_filling: параметры ограничивают выполнение: sessions_target=%d max_inactive_days=%d", s.config.SessionsTarget, s.config.MaxInactiveDays)
 		return total, nil
 	}
 
+	log.Printf("tickers_filling: загрузка справочника тикеров")
 	tickers, err := s.tickerInfoRepo.ListAll(ctx)
 	if err != nil {
 		return FillStats{}, fmt.Errorf("tickers filling: list tickers: %w", err)
 	}
+	log.Printf("tickers_filling: найдено тикеров: %d", len(tickers))
 
 	startDate := s.yesterdayMoscow()
+	log.Printf("tickers_filling: стартовая дата обработки: %s", startDate.Format("2006-01-02"))
 
 	for _, ticker := range tickers {
+		log.Printf("tickers_filling: начало обработки тикера %s", ticker.TickerName)
 		stats, err := s.fillTicker(ctx, ticker, startDate)
 		if err != nil {
 			return FillStats{}, fmt.Errorf("tickers filling: %s: %w", ticker.TickerName, err)
 		}
 		total.add(stats)
+		log.Printf(
+			"tickers_filling: тикер %s обработан: существующих=%d созданных=%d активных_дат=%d неактивных_дат=%d",
+			ticker.TickerName,
+			stats.ExistingRecords,
+			stats.CreatedRecords,
+			stats.ActiveSessionDates,
+			stats.InactiveSessionDates,
+		)
 	}
 
 	return total, nil
@@ -124,12 +138,26 @@ func (s *Service) fillTicker(ctx context.Context, ticker models.TickerInfo, star
 	iterations := 0
 	sessionDate := startDate
 
+	log.Printf(
+		"tickers_filling: %s: цель активных сессий=%d, максимум неактивных дней=%d",
+		ticker.TickerName,
+		s.config.SessionsTarget,
+		s.config.MaxInactiveDays,
+	)
+
 	for iterations < s.config.MaxInactiveDays && activeSessions < s.config.SessionsTarget {
 		if err := ctx.Err(); err != nil {
 			return stats, err
 		}
 
 		dbDate := time.Date(sessionDate.Year(), sessionDate.Month(), sessionDate.Day(), 0, 0, 0, 0, time.UTC)
+		log.Printf(
+			"tickers_filling: %s: проверка даты %s (итерация=%d активных=%d)",
+			ticker.TickerName,
+			sessionDate.Format("2006-01-02"),
+			iterations+1,
+			activeSessions,
+		)
 
 		history, err := s.historyRepo.GetByDateAndName(ctx, ticker.TickerName, dbDate)
 		if err == nil {
@@ -137,10 +165,13 @@ func (s *Service) fillTicker(ctx context.Context, ticker models.TickerInfo, star
 			if history.TradingSessionActive {
 				activeSessions++
 				stats.ActiveSessionDates++
+				log.Printf("tickers_filling: %s: запись уже существует и сессия активна", ticker.TickerName)
 			} else {
 				stats.InactiveSessionDates++
+				log.Printf("tickers_filling: %s: запись уже существует и сессия неактивна", ticker.TickerName)
 			}
 		} else if errors.Is(err, db.ErrNotFound) {
+			log.Printf("tickers_filling: %s: данных за дату %s нет, начинаем расчёт", ticker.TickerName, sessionDate.Format("2006-01-02"))
 			sessionData, calcErr := s.computeSession(ctx, ticker.ID, sessionDate)
 			if calcErr != nil {
 				return stats, calcErr
@@ -149,8 +180,10 @@ func (s *Service) fillTicker(ctx context.Context, ticker models.TickerInfo, star
 			if sessionData.active {
 				activeSessions++
 				stats.ActiveSessionDates++
+				log.Printf("tickers_filling: %s: расчёт показал активную сессию", ticker.TickerName)
 			} else {
 				stats.InactiveSessionDates++
+				log.Printf("tickers_filling: %s: расчёт показал неактивную сессию", ticker.TickerName)
 			}
 
 			entity := models.TickerHistory{
@@ -167,21 +200,35 @@ func (s *Service) fillTicker(ctx context.Context, ticker models.TickerInfo, star
 				return stats, fmt.Errorf("insert ticker_history: %w", err)
 			}
 			stats.CreatedRecords++
+			log.Printf("tickers_filling: %s: запись создана", ticker.TickerName)
 		} else {
 			return stats, fmt.Errorf("get ticker_history: %w", err)
 		}
 
 		iterations++
 		sessionDate = sessionDate.AddDate(0, 0, -1)
+		log.Printf(
+			"tickers_filling: %s: переход к следующей дате %s",
+			ticker.TickerName,
+			sessionDate.Format("2006-01-02"),
+		)
 
 		if iterations < s.config.MaxInactiveDays && activeSessions < s.config.SessionsTarget {
 			select {
 			case <-time.After(500 * time.Millisecond):
+				log.Printf("tickers_filling: %s: пауза между запросами завершена", ticker.TickerName)
 			case <-ctx.Done():
 				return stats, ctx.Err()
 			}
 		}
 	}
+
+	log.Printf(
+		"tickers_filling: %s: цикл завершён после %d итераций (активных=%d)",
+		ticker.TickerName,
+		iterations,
+		activeSessions,
+	)
 
 	return stats, nil
 }
@@ -196,9 +243,11 @@ type sessionComputation struct {
 func (s *Service) computeSession(ctx context.Context, tickerInfoID int64, sessionDate time.Time) (sessionComputation, error) {
 	var result sessionComputation
 
+	log.Printf("tickers_filling: вычисление сессии для тикера %d за дату %s", tickerInfoID, sessionDate.Format("2006-01-02"))
 	valueArea, err := s.valueAreaCalc.Calculate(ctx, tickerInfoID, sessionDate)
 	if err != nil {
 		if errors.Is(err, indicators.ErrNoTrades) {
+			log.Printf("tickers_filling: для тикера %d нет сделок за дату %s", tickerInfoID, sessionDate.Format("2006-01-02"))
 			return result, nil
 		}
 		return result, fmt.Errorf("calculate value area: %w", err)
@@ -208,6 +257,13 @@ func (s *Service) computeSession(ctx context.Context, tickerInfoID int64, sessio
 	result.vwap = stringPointer(strconv.FormatFloat(valueArea.VWAP, 'f', 6, 64))
 	result.val = stringPointer(strconv.FormatFloat(valueArea.VAL, 'f', 6, 64))
 	result.vah = stringPointer(strconv.FormatFloat(valueArea.VAH, 'f', 6, 64))
+	log.Printf(
+		"tickers_filling: тикер %d: VWAP=%s VAL=%s VAH=%s",
+		tickerInfoID,
+		derefOrPlaceholder(result.vwap),
+		derefOrPlaceholder(result.val),
+		derefOrPlaceholder(result.vah),
+	)
 
 	return result, nil
 }
@@ -220,4 +276,11 @@ func (s *Service) yesterdayMoscow() time.Time {
 
 func stringPointer(value string) *string {
 	return &value
+}
+
+func derefOrPlaceholder(value *string) string {
+	if value == nil {
+		return "-"
+	}
+	return *value
 }
