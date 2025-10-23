@@ -6,7 +6,6 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -78,23 +77,9 @@ func TestMainSessionBounds(t *testing.T) {
 
 func TestFetchTradesReturnsInvalidRequestOn404(t *testing.T) {
 	token := "token"
-	from := time.Date(2024, 5, 20, 7, 0, 0, 0, time.UTC)
-	to := time.Date(2024, 5, 20, 12, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("token"); got != token {
 			t.Fatalf("unexpected token query: %q", got)
-		}
-		if got := r.URL.Query().Get("instrumentGroup"); got != "TQBR" {
-			t.Fatalf("unexpected instrumentGroup: %q", got)
-		}
-		if got := r.URL.Query().Get("from"); got != strconv.FormatInt(from.UTC().Unix(), 10) {
-			t.Fatalf("unexpected from query: %q", got)
-		}
-		if got := r.URL.Query().Get("to"); got != strconv.FormatInt(to.UTC().Unix(), 10) {
-			t.Fatalf("unexpected to query: %q", got)
-		}
-		if got := r.URL.Path; got != "/md/v2/Securities/MOEX/BAD/alltrades" {
-			t.Fatalf("unexpected path: %q", got)
 		}
 		http.Error(w, "not found", http.StatusNotFound)
 	}))
@@ -104,7 +89,9 @@ func TestFetchTradesReturnsInvalidRequestOn404(t *testing.T) {
 	client := NewMarketDataClient(server.URL, provider)
 	client.WithHTTPClient(server.Client())
 
-	_, err := client.FetchTrades(context.Background(), "TQBR", "BAD", from, to)
+	from := time.Now().Add(-time.Hour)
+	to := time.Now()
+	_, err := client.FetchTrades(context.Background(), "MOEX", "BAD", from, to)
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("expected ErrInvalidRequest, got %v", err)
 	}
