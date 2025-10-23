@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"invest_intraday/internal/auth"
 )
 
 const (
@@ -28,8 +30,8 @@ const (
 
 // Client инкапсулирует обращение к ALOR OpenAPI для получения рыночных данных.
 type Client struct {
-	httpClient *http.Client
-	token      string
+	httpClient    *http.Client
+	tokenProvider *auth.AlorTokenProvider
 }
 
 // Instrument описывает инструмент на бирже ALOR.
@@ -48,15 +50,20 @@ type Trade struct {
 	TradeTime      string
 }
 
-// NewClient создаёт клиента ALOR OpenAPI с заданным токеном доступа.
-func NewClient(token string) (*Client, error) {
-	if strings.TrimSpace(token) == "" {
-		return nil, fmt.Errorf("alor: empty token")
+// NewClient создаёт клиента ALOR OpenAPI, используя refresh-токен для получения access-токена.
+func NewClient(refreshToken string) (*Client, error) {
+	if strings.TrimSpace(refreshToken) == "" {
+		return nil, fmt.Errorf("alor: empty refresh token")
+	}
+
+	tokenProvider, err := auth.NewAlorTokenProvider(refreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("alor: создать провайдер токенов: %w", err)
 	}
 
 	client := &Client{
-		httpClient: &http.Client{Timeout: requestTimeout},
-		token:      token,
+		httpClient:    &http.Client{Timeout: requestTimeout},
+		tokenProvider: tokenProvider,
 	}
 
 	return client, nil
@@ -115,30 +122,75 @@ func (c *Client) fetchTrades(ctx context.Context, instrument Instrument, from, t
 	query.Set("dateTo", fmt.Sprintf("%d", to.UTC().Unix()))
 	query.Set("limit", fmt.Sprintf("%d", defaultPageSize))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+query.Encode(), nil)
+	fullURL := endpoint + "?" + query.Encode()
+
+	accessToken, err := c.tokenProvider.AccessToken(ctx)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("alor: build request: %w", err)
+		return nil, time.Time{}, fmt.Errorf("alor: получить access-токен: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/json")
+
+	buildRequest := func(token string) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("alor: build request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/json")
+		return req, nil
+	}
+
+	send := func(r *http.Request, label string) (int, string, []byte, error) {
+		resp, err := c.httpClient.Do(r)
+		if err != nil {
+			return 0, "", nil, fmt.Errorf("alor: send request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return 0, "", nil, fmt.Errorf("alor: read response: %w", err)
+		}
+
+		log.Printf("alor: %s %s статус=%s тело=%s", label, endpoint, resp.Status, string(bodyBytes))
+
+		return resp.StatusCode, resp.Status, bodyBytes, nil
+	}
+
+	req, err := buildRequest(accessToken)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
 
 	log.Printf("alor: запрос %s %s?%s", http.MethodGet, endpoint, query.Encode())
 
-	resp, err := c.httpClient.Do(req)
+	statusCode, statusText, bodyBytes, err := send(req, "ответ")
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("alor: send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("alor: read response: %w", err)
+		return nil, time.Time{}, err
 	}
 
-	log.Printf("alor: ответ %s статус=%s тело=%s", endpoint, resp.Status, string(bodyBytes))
+	if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+		c.tokenProvider.Invalidate()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, time.Time{}, fmt.Errorf("alor: trades status %s", resp.Status)
+		accessToken, err = c.tokenProvider.AccessToken(ctx)
+		if err != nil {
+			return nil, time.Time{}, fmt.Errorf("alor: обновить access-токен после %s: %w", statusText, err)
+		}
+
+		req, err = buildRequest(accessToken)
+		if err != nil {
+			return nil, time.Time{}, err
+		}
+
+		log.Printf("alor: повторный запрос %s %s?%s", http.MethodGet, endpoint, query.Encode())
+
+		statusCode, statusText, bodyBytes, err = send(req, "повторный ответ")
+		if err != nil {
+			return nil, time.Time{}, err
+		}
+	}
+
+	if statusCode != http.StatusOK {
+		return nil, time.Time{}, fmt.Errorf("alor: trades status %s", statusText)
 	}
 
 	var payload []rawTrade
