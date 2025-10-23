@@ -7,22 +7,29 @@ import (
 	"time"
 
 	"invest_intraday/internal/a_submodule/alor"
-	"invest_intraday/internal/a_technical/db"
 	"invest_intraday/models"
 )
 
-type sessionFetcher struct {
-	tickerRepo *db.TickerInfoRepository
-	alorClient *alor.Client
+type tickerInfoProvider interface {
+	GetByID(ctx context.Context, id int64) (models.TickerInfo, error)
 }
 
-func newSessionFetcher(tickerRepo *db.TickerInfoRepository, alorClient *alor.Client) *sessionFetcher {
-	if tickerRepo == nil || alorClient == nil {
+type tradeProvider interface {
+	Trades(ctx context.Context, instrument alor.Instrument, sessionDate time.Time) ([]alor.Trade, error)
+}
+
+type sessionFetcher struct {
+	tickerRepo tickerInfoProvider
+	market     tradeProvider
+}
+
+func newSessionFetcher(tickerRepo tickerInfoProvider, market tradeProvider) *sessionFetcher {
+	if tickerRepo == nil || market == nil {
 		return nil
 	}
 	return &sessionFetcher{
 		tickerRepo: tickerRepo,
-		alorClient: alorClient,
+		market:     market,
 	}
 }
 
@@ -37,7 +44,7 @@ func (f *sessionFetcher) mainSessionTrades(ctx context.Context, tickerInfoID int
 	}
 
 	instrument := f.instrumentFromInfo(info)
-	trades, err := f.alorClient.Trades(ctx, instrument, sessionDate)
+	trades, err := f.market.Trades(ctx, instrument, sessionDate)
 	if err != nil {
 		return models.TickerInfo{}, nil, fmt.Errorf("load trades: %w", err)
 	}

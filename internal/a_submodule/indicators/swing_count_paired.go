@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"invest_intraday/internal/a_submodule/alor"
-	"invest_intraday/internal/a_technical/db"
 )
 
 // SwingCountParams задаёт параметры адаптивного ZigZag.
@@ -32,7 +31,7 @@ type SwingCountPairedCalculator struct {
 }
 
 // NewSwingCountPairedCalculator создаёт расчётчик Swing Count Paired.
-func NewSwingCountPairedCalculator(tickerRepo *db.TickerInfoRepository, marketClient *alor.Client, params SwingCountParams) *SwingCountPairedCalculator {
+func NewSwingCountPairedCalculator(tickerRepo tickerInfoProvider, marketClient tradeProvider, params SwingCountParams) *SwingCountPairedCalculator {
 	normalized := normalizeSwingParams(params)
 	fetcher := newSessionFetcher(tickerRepo, marketClient)
 	return &SwingCountPairedCalculator{
