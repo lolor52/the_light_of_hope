@@ -1,6 +1,7 @@
 package indicators
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -40,6 +41,7 @@ type MarketDataClient struct {
 	baseURL       string
 	httpClient    *http.Client
 	tokenProvider TokenProvider
+	lastResponse  string
 }
 
 // NewMarketDataClient создаёт клиент для запросов маркет-даты Alor.
@@ -128,11 +130,21 @@ func (c *ValueAreaCalculator) CalculateMainSessionProfile(ctx context.Context, t
 	return SessionProfile{VWAP: vwap, VAL: val, VAH: vah}, nil
 }
 
+// LastAlorResponse возвращает текст последнего ответа Alor.
+func (c *ValueAreaCalculator) LastAlorResponse() string {
+	if c == nil || c.mdClient == nil {
+		return ""
+	}
+
+	return c.mdClient.LastResponse()
+}
+
 // FetchTrades выгружает сделки за указанный период у Alor.
 func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string, from, to time.Time) ([]trade, error) {
 	if c == nil {
 		return nil, errors.New("indicators: nil market data client")
 	}
+	c.lastResponse = ""
 	if c.tokenProvider == nil {
 		return nil, errors.New("indicators: token provider is required")
 	}
@@ -169,6 +181,7 @@ func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string,
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		c.lastResponse = fmt.Sprintf("request error: %v", err)
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
 	defer resp.Body.Close()
@@ -176,16 +189,31 @@ func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string,
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusNoContent, http.StatusNotFound:
-		io.Copy(io.Discard, resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.lastResponse = truncateForLog(body)
+		if len(body) == 0 {
+			c.lastResponse = fmt.Sprintf("status %d without body", resp.StatusCode)
+		}
 		return nil, ErrNoTrades
 	default:
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.lastResponse = truncateForLog(body)
 		return nil, fmt.Errorf("alor market data: unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.lastResponse = fmt.Sprintf("read body error: %v", err)
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	c.lastResponse = truncateForLog(body)
+
 	var payload []map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&payload); err != nil {
 		if errors.Is(err, io.EOF) {
+			if len(body) == 0 {
+				c.lastResponse = "empty body"
+			}
 			return nil, ErrNoTrades
 		}
 		return nil, fmt.Errorf("decode response: %w", err)
@@ -213,6 +241,24 @@ func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string,
 	}
 
 	return trades, nil
+}
+
+// LastResponse возвращает строку для логирования последнего ответа Alor.
+func (c *MarketDataClient) LastResponse() string {
+	if c == nil {
+		return ""
+	}
+	return c.lastResponse
+}
+
+func truncateForLog(data []byte) string {
+	const maxLen = 512
+	text := strings.TrimSpace(string(data))
+	if len(text) <= maxLen {
+		return text
+	}
+
+	return text[:maxLen] + "..."
 }
 
 func extractFloat(item map[string]any, keys ...string) (float64, bool) {
