@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"invest_intraday/internal/a_submodule/moex"
+	"invest_intraday/internal/a_submodule/alor"
 	"invest_intraday/internal/a_technical/db"
 )
 
@@ -32,9 +32,9 @@ type SwingCountPairedCalculator struct {
 }
 
 // NewSwingCountPairedCalculator создаёт расчётчик Swing Count Paired.
-func NewSwingCountPairedCalculator(tickerRepo *db.TickerInfoRepository, issClient *moex.ISSClient, params SwingCountParams) *SwingCountPairedCalculator {
+func NewSwingCountPairedCalculator(tickerRepo *db.TickerInfoRepository, marketClient *alor.Client, params SwingCountParams) *SwingCountPairedCalculator {
 	normalized := normalizeSwingParams(params)
-	fetcher := newSessionFetcher(tickerRepo, issClient)
+	fetcher := newSessionFetcher(tickerRepo, marketClient)
 	return &SwingCountPairedCalculator{
 		fetcher: fetcher,
 		params:  normalized,
@@ -81,13 +81,13 @@ type minuteBar struct {
 	tradeCount int
 }
 
-func buildMinuteBars(trades []moex.Trade, sessionDate time.Time) ([]minuteBar, error) {
+func buildMinuteBars(trades []alor.Trade, sessionDate time.Time) ([]minuteBar, error) {
 	if len(trades) == 0 {
 		return nil, ErrNoTrades
 	}
 
 	type timedTrade struct {
-		trade moex.Trade
+		trade alor.Trade
 		ts    time.Time
 	}
 
