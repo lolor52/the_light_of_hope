@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
@@ -85,22 +84,15 @@ func (s *Service) Fill(ctx context.Context) (FillStats, error) {
 		return summary, errors.New("tickers_filling: nil service")
 	}
 
-	log.Printf("tickers_filling: start fill sessions_limit=%d max_inactive_days=%d", s.sessionsLimit, s.maxInactiveDays)
-
 	tickers, err := s.tickerInfos.ListAll(ctx)
 	if err != nil {
 		return summary, fmt.Errorf("tickers_filling: list ticker info: %w", err)
 	}
 
-	log.Printf("tickers_filling: fetched %d tickers", len(tickers))
-
 	startDate := s.yesterdayInMoscow()
-	log.Printf("tickers_filling: start date set to %s", startDate.Format("2006-01-02"))
 
 	for _, info := range tickers {
-		log.Printf("tickers_filling: processing ticker %s board=%s", info.TickerName, info.BoardID)
 		if info.BoardID != "TQBR" {
-			log.Printf("tickers_filling: skip ticker %s due to board %s", info.TickerName, info.BoardID)
 			continue
 		}
 
@@ -113,24 +105,7 @@ func (s *Service) Fill(ctx context.Context) (FillStats, error) {
 		summary.CreatedEntries += stats.CreatedEntries
 		summary.ActiveSessions += stats.ActiveSessions
 		summary.InactiveSessions += stats.InactiveSessions
-
-		log.Printf(
-			"tickers_filling: ticker %s processed existing=%d created=%d active=%d inactive=%d",
-			info.TickerName,
-			stats.ExistingEntries,
-			stats.CreatedEntries,
-			stats.ActiveSessions,
-			stats.InactiveSessions,
-		)
 	}
-
-	log.Printf(
-		"tickers_filling: fill completed existing=%d created=%d active=%d inactive=%d",
-		summary.ExistingEntries,
-		summary.CreatedEntries,
-		summary.ActiveSessions,
-		summary.InactiveSessions,
-	)
 
 	return summary, nil
 }
@@ -147,11 +122,9 @@ func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo,
 	var stats FillStats
 
 	if s.sessionsLimit <= 0 {
-		log.Printf("tickers_filling: sessions limit <= 0 skip ticker %s", info.TickerName)
 		return stats, nil
 	}
 	if s.maxInactiveDays <= 0 {
-		log.Printf("tickers_filling: max inactive days <= 0 skip ticker %s", info.TickerName)
 		return stats, nil
 	}
 
@@ -159,12 +132,6 @@ func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo,
 
 	for iteration := 0; iteration < s.maxInactiveDays && activeSessions < s.sessionsLimit; iteration++ {
 		sessionDate := startDate.AddDate(0, 0, -iteration)
-		log.Printf(
-			"tickers_filling: check history ticker=%s date=%s iteration=%d",
-			info.TickerName,
-			sessionDate.Format("2006-01-02"),
-			iteration,
-		)
 
 		history, err := s.tickerHistory.GetByDateAndName(ctx, info.TickerName, sessionDate)
 		if err == nil {
@@ -172,36 +139,14 @@ func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo,
 			if history.TradingSessionActive {
 				activeSessions++
 				stats.ActiveSessions++
-				log.Printf(
-					"tickers_filling: history exists ticker=%s date=%s active=true",
-					info.TickerName,
-					sessionDate.Format("2006-01-02"),
-				)
 			} else {
 				stats.InactiveSessions++
-				log.Printf(
-					"tickers_filling: history exists ticker=%s date=%s active=false",
-					info.TickerName,
-					sessionDate.Format("2006-01-02"),
-				)
 			}
 			continue
 		}
 		if !errors.Is(err, db.ErrNotFound) {
-			log.Printf(
-				"tickers_filling: error loading history ticker=%s date=%s err=%v",
-				info.TickerName,
-				sessionDate.Format("2006-01-02"),
-				err,
-			)
 			return stats, fmt.Errorf("tickers_filling: load history %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
 		}
-
-		log.Printf(
-			"tickers_filling: history missing ticker=%s date=%s request session profile",
-			info.TickerName,
-			sessionDate.Format("2006-01-02"),
-		)
 
 		profile, err := s.calculator.CalculateMainSessionProfile(ctx, info.ID, sessionDate)
 		sessionActive := false
@@ -215,29 +160,10 @@ func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo,
 			vah = floatToPtr(profile.VAH)
 			activeSessions++
 			stats.ActiveSessions++
-			log.Printf(
-				"tickers_filling: Alor profile ticker=%s date=%s vwap=%s val=%s vah=%s",
-				info.TickerName,
-				sessionDate.Format("2006-01-02"),
-				*vwap,
-				*val,
-				*vah,
-			)
 		case errors.Is(err, indicators.ErrNoTrades):
 			sessionActive = false
 			stats.InactiveSessions++
-			log.Printf(
-				"tickers_filling: Alor response no trades ticker=%s date=%s",
-				info.TickerName,
-				sessionDate.Format("2006-01-02"),
-			)
 		default:
-			log.Printf(
-				"tickers_filling: error calculating session ticker=%s date=%s err=%v",
-				info.TickerName,
-				sessionDate.Format("2006-01-02"),
-				err,
-			)
 			return stats, fmt.Errorf("tickers_filling: calculate session %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
 		}
 
@@ -252,21 +178,9 @@ func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo,
 		}
 
 		if err := s.tickerHistory.Insert(ctx, entity); err != nil {
-			log.Printf(
-				"tickers_filling: error inserting history ticker=%s date=%s err=%v",
-				info.TickerName,
-				sessionDate.Format("2006-01-02"),
-				err,
-			)
 			return stats, fmt.Errorf("tickers_filling: insert history %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
 		}
 		stats.CreatedEntries++
-		log.Printf(
-			"tickers_filling: history inserted ticker=%s date=%s active=%t",
-			info.TickerName,
-			sessionDate.Format("2006-01-02"),
-			sessionActive,
-		)
 	}
 
 	return stats, nil
