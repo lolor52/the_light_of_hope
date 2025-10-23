@@ -1,8 +1,8 @@
 {
   // Строка подключения к базе данных PostgreSQL
   "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/invest_intraday_db?sslmode=disable",
-  // Токен доступа к API Alor для получения рыночных данных
-  "alor_token": "bc5f42b1-dedc-40c3-a870-05addb5495f8",
+  // Refresh-токен для получения доступа к API Alor
+  "alor_refresh_token": "bc5f42b1-dedc-40c3-a870-05addb5495f8",
   // Количество торговых сессий, для которых заполняются данные по тикерам
   "tickers_filling_sessions": 6,
   // Максимальное количество дней без торгов для продолжения поиска исторических данных
