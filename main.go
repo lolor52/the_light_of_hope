@@ -24,8 +24,7 @@ func main() {
 		log.Fatalf("не удалось загрузить конфигурацию: %v", err)
 	}
 
-	alorEnv := detectAlorEnvironment()
-	alorClient, err := alor.NewClient(cfg.AlorRefreshToken, alor.WithEnvironment(alorEnv))
+	alorClient, err := alor.NewClient(cfg.AlorRefreshToken)
 	if err != nil {
 		log.Fatalf("ошибка инициализации клиента Alor: %v", err)
 	}
@@ -58,7 +57,7 @@ func main() {
 	tickerInfoRepo := tickersdb.NewTickerInfoRepository(sqlDB)
 	tickerHistoryRepo := tickersdb.NewTickerRepository(sqlDB)
 
-	marketDataClient := indicators.NewMarketDataClient(alorEnv.APIURL, alorClient)
+	marketDataClient := indicators.NewMarketDataClient(alor.ProdEnvironment.APIURL, alorClient)
 	calculator := indicators.NewValueAreaCalculator(tickerInfoRepo, marketDataClient)
 
 	fillingService, err := tickers_filling.NewService(
@@ -106,13 +105,4 @@ func loadAppConfig() (config.Config, error) {
 	}
 
 	return cfg, nil
-}
-
-func detectAlorEnvironment() alor.Environment {
-	switch strings.ToLower(os.Getenv("ALOR_ENV")) {
-	case "dev", "test":
-		return alor.DevEnvironment
-	default:
-		return alor.ProdEnvironment
-	}
 }
