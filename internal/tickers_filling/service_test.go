@@ -104,8 +104,22 @@ func TestServiceFillCreatesActiveSessions(t *testing.T) {
 		return time.Date(2025, 10, 21, 12, 0, 0, 0, moscow)
 	}
 
-	if err := svc.Fill(context.Background()); err != nil {
+	summary, err := svc.Fill(context.Background())
+	if err != nil {
 		t.Fatalf("Fill returned error: %v", err)
+	}
+
+	if summary.CreatedRecords != 2 {
+		t.Fatalf("unexpected created records: %d", summary.CreatedRecords)
+	}
+	if summary.ActiveSessions != 2 {
+		t.Fatalf("unexpected active sessions: %d", summary.ActiveSessions)
+	}
+	if summary.InactiveSessions != 0 {
+		t.Fatalf("unexpected inactive sessions: %d", summary.InactiveSessions)
+	}
+	if summary.ExistingRecords != 0 {
+		t.Fatalf("unexpected existing records: %d", summary.ExistingRecords)
 	}
 
 	if len(historyRepo.entries) != 2 {
@@ -156,8 +170,22 @@ func TestServiceFillCreatesInactiveSession(t *testing.T) {
 		return time.Date(2025, 10, 21, 15, 0, 0, 0, moscow)
 	}
 
-	if err := svc.Fill(context.Background()); err != nil {
+	summary, err := svc.Fill(context.Background())
+	if err != nil {
 		t.Fatalf("Fill returned error: %v", err)
+	}
+
+	if summary.CreatedRecords != 2 {
+		t.Fatalf("unexpected created records: %d", summary.CreatedRecords)
+	}
+	if summary.ActiveSessions != 1 {
+		t.Fatalf("unexpected active sessions: %d", summary.ActiveSessions)
+	}
+	if summary.InactiveSessions != 1 {
+		t.Fatalf("unexpected inactive sessions: %d", summary.InactiveSessions)
+	}
+	if summary.ExistingRecords != 0 {
+		t.Fatalf("unexpected existing records: %d", summary.ExistingRecords)
 	}
 
 	inactive, ok := historyRepo.entries["SBER:2025-10-20"]
@@ -199,8 +227,22 @@ func TestServiceFillSkipsExistingHistory(t *testing.T) {
 		return time.Date(2025, 10, 21, 10, 0, 0, 0, moscow)
 	}
 
-	if err := svc.Fill(context.Background()); err != nil {
+	summary, err := svc.Fill(context.Background())
+	if err != nil {
 		t.Fatalf("Fill returned error: %v", err)
+	}
+
+	if summary.CreatedRecords != 1 {
+		t.Fatalf("unexpected created records: %d", summary.CreatedRecords)
+	}
+	if summary.ExistingRecords != 1 {
+		t.Fatalf("unexpected existing records: %d", summary.ExistingRecords)
+	}
+	if summary.ActiveSessions != 2 {
+		t.Fatalf("unexpected active sessions: %d", summary.ActiveSessions)
+	}
+	if summary.InactiveSessions != 0 {
+		t.Fatalf("unexpected inactive sessions: %d", summary.InactiveSessions)
 	}
 
 	if len(historyRepo.entries) != 2 {
