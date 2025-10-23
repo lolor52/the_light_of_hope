@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -121,18 +123,27 @@ func (c *Client) fetchTrades(ctx context.Context, instrument Instrument, from, t
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
 
+	log.Printf("alor: запрос %s %s?%s", http.MethodGet, endpoint, query.Encode())
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("alor: send request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("alor: read response: %w", err)
+	}
+
+	log.Printf("alor: ответ %s статус=%s тело=%s", endpoint, resp.Status, string(bodyBytes))
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, time.Time{}, fmt.Errorf("alor: trades status %s", resp.Status)
 	}
 
 	var payload []rawTrade
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
 		return nil, time.Time{}, fmt.Errorf("alor: decode trades: %w", err)
 	}
 
