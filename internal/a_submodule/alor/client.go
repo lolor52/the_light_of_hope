@@ -111,10 +111,9 @@ func (c *Client) fetchTrades(ctx context.Context, instrument Instrument, from, t
 	endpoint := buildEndpoint(instrument)
 
 	query := url.Values{}
-	query.Set("from", from.UTC().Format(time.RFC3339Nano))
-	query.Set("to", to.UTC().Format(time.RFC3339Nano))
+	query.Set("dateFrom", fmt.Sprintf("%d", from.UTC().Unix()))
+	query.Set("dateTo", fmt.Sprintf("%d", to.UTC().Unix()))
 	query.Set("limit", fmt.Sprintf("%d", defaultPageSize))
-	query.Set("direction", "1")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+query.Encode(), nil)
 	if err != nil {
@@ -185,10 +184,8 @@ func buildEndpoint(instrument Instrument) string {
 	builder.WriteString("/md/v2/Securities/")
 	builder.WriteString(url.PathEscape(strings.ToUpper(instrument.Exchange)))
 	builder.WriteByte('/')
-	builder.WriteString(url.PathEscape(strings.ToUpper(instrument.Board)))
-	builder.WriteByte('/')
 	builder.WriteString(url.PathEscape(strings.ToUpper(instrument.Symbol)))
-	builder.WriteString("/alltrades")
+	builder.WriteString("/alltrades/history")
 	return builder.String()
 }
 
