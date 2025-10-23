@@ -41,6 +41,9 @@ func TestClientCheckAuthorizationUsesCachedToken(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer "+tokenValue {
 			t.Fatalf("unexpected Authorization header: %q", got)
 		}
+		if got := r.URL.Query().Get("token"); got != tokenValue {
+			t.Fatalf("unexpected token query: %q", got)
+		}
 
 		_, _ = w.Write([]byte(`{"levels":[]}`))
 	}))
@@ -83,6 +86,9 @@ func TestClientCheckAuthorizationRefreshesWhenTokenAboutToExpire(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer "+newToken {
 			t.Fatalf("unexpected Authorization header: %q", got)
 		}
+		if got := r.URL.Query().Get("token"); got != newToken {
+			t.Fatalf("unexpected token query: %q", got)
+		}
 
 		_, _ = w.Write([]byte(`{"levels":[]}`))
 	}))
@@ -122,11 +128,18 @@ func TestClientCheckAuthorizationRetriesOnUnauthorized(t *testing.T) {
 	var seenNewToken atomic.Bool
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
+		tokenQuery := r.URL.Query().Get("token")
 		switch auth {
 		case "Bearer " + oldToken:
+			if tokenQuery != oldToken {
+				t.Fatalf("unexpected token query for old token: %q", tokenQuery)
+			}
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		case "Bearer " + newToken:
+			if tokenQuery != newToken {
+				t.Fatalf("unexpected token query for new token: %q", tokenQuery)
+			}
 			seenNewToken.Store(true)
 			_, _ = w.Write([]byte(`{"levels":[]}`))
 			return
@@ -165,6 +178,9 @@ func TestClientCheckAuthorizationUnauthorizedAfterRefresh(t *testing.T) {
 	t.Cleanup(oauth.Close)
 
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("token"); got == "" {
+			t.Fatal("expected token query parameter")
+		}
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}))
 	t.Cleanup(api.Close)
@@ -190,6 +206,9 @@ func TestClientCheckAuthorizationUnexpectedStatus(t *testing.T) {
 	t.Cleanup(oauth.Close)
 
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("token"); got == "" {
+			t.Fatal("expected token query parameter")
+		}
 		http.Error(w, "bad request", http.StatusBadRequest)
 	}))
 	t.Cleanup(api.Close)

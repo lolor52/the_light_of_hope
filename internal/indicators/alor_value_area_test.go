@@ -1,7 +1,12 @@
 package indicators
 
 import (
+	"context"
+	"errors"
 	"math"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,4 +73,39 @@ func TestMainSessionBounds(t *testing.T) {
 	if !end.Equal(expectedEnd) {
 		t.Fatalf("unexpected end: got %v, want %v", end, expectedEnd)
 	}
+}
+
+func TestFetchTradesReturnsInvalidRequestOn404(t *testing.T) {
+	token := "token"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("token"); got != token {
+			t.Fatalf("unexpected token query: %q", got)
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	t.Cleanup(server.Close)
+
+	provider := staticTokenProvider{token: token}
+	client := NewMarketDataClient(server.URL, provider)
+	client.WithHTTPClient(server.Client())
+
+	from := time.Now().Add(-time.Hour)
+	to := time.Now()
+	_, err := client.FetchTrades(context.Background(), "MOEX", "BAD", from, to)
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+
+	response := client.LastResponse()
+	if !strings.Contains(response, "status=404") {
+		t.Fatalf("expected response snapshot with status, got %q", response)
+	}
+}
+
+type staticTokenProvider struct {
+	token string
+}
+
+func (s staticTokenProvider) AccessToken(context.Context) (string, error) {
+	return s.token, nil
 }

@@ -259,6 +259,10 @@ func (c *Client) queryOrderBook(ctx context.Context, token string) (bool, bool, 
 		return false, false, fmt.Errorf("create orderbook request: %w", err)
 	}
 
+	query := req.URL.Query()
+	query.Set("token", token)
+	req.URL.RawQuery = query.Encode()
+
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
 
