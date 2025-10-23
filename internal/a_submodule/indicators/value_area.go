@@ -19,11 +19,12 @@ var ErrNoTrades = errors.New("no trades for main session")
 
 // Calculator рассчитывает VAH/VAL/VWAP для основной торговой сессии.
 type Calculator struct {
-	tickerRepo *db.TickerInfoRepository
-	issClient  *moex.ISSClient
+	fetcher *sessionFetcher
+}
 
-	boardCache map[string]moex.BoardMetadata
-	cacheMu    sync.Mutex
+type priceLevel struct {
+	Price  float64
+	Volume float64
 }
 
 // Result содержит рассчитанные метрики торговой сессии.
@@ -41,34 +42,17 @@ var (
 // NewCalculator создаёт сервис расчёта метрик.
 func NewCalculator(tickerRepo *db.TickerInfoRepository, issClient *moex.ISSClient) *Calculator {
 	return &Calculator{
-		tickerRepo: tickerRepo,
-		issClient:  issClient,
-		boardCache: make(map[string]moex.BoardMetadata),
+		fetcher: newSessionFetcher(tickerRepo, issClient),
 	}
 }
 
 // Calculate рассчитывает VAH/VAL/VWAP по идентификатору тикера и дате.
 func (c *Calculator) Calculate(ctx context.Context, tickerInfoID int64, sessionDate time.Time) (Result, error) {
-	if c.tickerRepo == nil || c.issClient == nil {
+	if c.fetcher == nil {
 		return Result{}, fmt.Errorf("calculator is not fully configured")
 	}
 
-	info, err := c.tickerRepo.GetByID(ctx, tickerInfoID)
-	if err != nil {
-		return Result{}, fmt.Errorf("load ticker info: %w", err)
-	}
-
-	board, err := c.boardMetadata(ctx, info.BoardID)
-	if err != nil {
-		return Result{}, fmt.Errorf("load board metadata: %w", err)
-	}
-
-	trades, err := c.issClient.Trades(ctx, board, info.BoardID, info.SecID, sessionDate)
-	if err != nil {
-		return Result{}, fmt.Errorf("load trades: %w", err)
-	}
-
-	mainTrades, err := filterMainSession(trades)
+	_, mainTrades, err := c.fetcher.mainSessionTrades(ctx, tickerInfoID, sessionDate)
 	if err != nil {
 		return Result{}, err
 	}
@@ -85,28 +69,6 @@ func (c *Calculator) Calculate(ctx context.Context, tickerInfoID int64, sessionD
 		VAL:  val,
 		VAH:  vah,
 	}, nil
-}
-
-func (c *Calculator) boardMetadata(ctx context.Context, boardID string) (moex.BoardMetadata, error) {
-	boardID = strings.ToUpper(boardID)
-
-	c.cacheMu.Lock()
-	board, ok := c.boardCache[boardID]
-	c.cacheMu.Unlock()
-	if ok {
-		return board, nil
-	}
-
-	board, err := c.issClient.BoardMetadata(ctx, boardID)
-	if err != nil {
-		return moex.BoardMetadata{}, err
-	}
-
-	c.cacheMu.Lock()
-	c.boardCache[boardID] = board
-	c.cacheMu.Unlock()
-
-	return board, nil
 }
 
 func filterMainSession(trades []moex.Trade) ([]moex.Trade, error) {
@@ -197,11 +159,6 @@ func calculateVWAP(trades []moex.Trade) (float64, error) {
 }
 
 func calculateValueArea(trades []moex.Trade) (float64, float64) {
-	type level struct {
-		Price  float64
-		Volume float64
-	}
-
 	volumeByPrice := make(map[float64]float64)
 	var totalVolume float64
 	for _, trade := range trades {
@@ -216,9 +173,9 @@ func calculateValueArea(trades []moex.Trade) (float64, float64) {
 		return 0, 0
 	}
 
-	levels := make([]level, 0, len(volumeByPrice))
+	levels := make([]priceLevel, 0, len(volumeByPrice))
 	for price, volume := range volumeByPrice {
-		levels = append(levels, level{Price: price, Volume: volume})
+		levels = append(levels, priceLevel{Price: price, Volume: volume})
 	}
 	sort.Slice(levels, func(i, j int) bool {
 		if levels[i].Price == levels[j].Price {
@@ -283,7 +240,7 @@ func calculateValueArea(trades []moex.Trade) (float64, float64) {
 	return val, vah
 }
 
-func volumeAt(levels []level, index int) float64 {
+func volumeAt(levels []priceLevel, index int) float64 {
 	if index < 0 || index >= len(levels) {
 		return 0
 	}
