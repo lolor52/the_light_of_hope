@@ -26,6 +26,8 @@ const (
 	mainSessionEndMinute = 45
 	valueAreaFraction    = 0.7
 	priceScale           = 100000
+	exchangeMOEX         = "MOEX"
+	exchangeSPBX         = "SPBX"
 )
 
 // ErrNoTrades означает, что для указанной сессии не найдено сделок.
@@ -143,7 +145,7 @@ func (c *ValueAreaCalculator) LastAlorResponse() string {
 }
 
 // FetchTrades выгружает сделки за указанный период у Alor.
-func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string, from, to time.Time) ([]trade, error) {
+func (c *MarketDataClient) FetchTrades(ctx context.Context, instrumentGroup, secID string, from, to time.Time) ([]trade, error) {
 	if c == nil {
 		return nil, errors.New("indicators: nil market data client")
 	}
@@ -154,8 +156,8 @@ func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string,
 	if c.httpClient == nil {
 		return nil, errors.New("indicators: http client is required")
 	}
-	if strings.TrimSpace(board) == "" {
-		return nil, errors.New("indicators: board is required")
+	if strings.TrimSpace(instrumentGroup) == "" {
+		return nil, errors.New("indicators: instrument group is required")
 	}
 	if strings.TrimSpace(secID) == "" {
 		return nil, errors.New("indicators: secid is required")
@@ -169,7 +171,8 @@ func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string,
 		return nil, fmt.Errorf("obtain access token: %w", err)
 	}
 
-	endpoint := fmt.Sprintf("%s/md/v2/securities/%s/%s/trades", c.baseURL, url.PathEscape(board), url.PathEscape(secID))
+	exchange := detectExchange(instrumentGroup)
+	endpoint := fmt.Sprintf("%s/md/v2/Securities/%s/%s/alltrades", c.baseURL, url.PathEscape(exchange), url.PathEscape(secID))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -177,8 +180,9 @@ func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string,
 	}
 
 	q := req.URL.Query()
-	q.Set("from", from.Format(time.RFC3339))
-	q.Set("to", to.Format(time.RFC3339))
+	q.Set("from", formatUnixSeconds(from))
+	q.Set("to", formatUnixSeconds(to))
+	q.Set("instrumentGroup", instrumentGroup)
 	q.Set("token", token)
 	req.URL.RawQuery = q.Encode()
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -244,6 +248,19 @@ func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string,
 	}
 
 	return trades, nil
+}
+
+func detectExchange(instrumentGroup string) string {
+	group := strings.ToUpper(strings.TrimSpace(instrumentGroup))
+	if strings.HasPrefix(group, "SPB") {
+		return exchangeSPBX
+	}
+
+	return exchangeMOEX
+}
+
+func formatUnixSeconds(t time.Time) string {
+	return strconv.FormatInt(t.UTC().Unix(), 10)
 }
 
 // LastResponse возвращает строку для логирования последнего ответа Alor.
