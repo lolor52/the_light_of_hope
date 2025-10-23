@@ -102,7 +102,7 @@ func newTickersFillingService(db *sql.DB, cfg config.Config) (*tickers_filling.S
 	tickerInfoRepo := dbpkg.NewTickerInfoRepository(db)
 	historyRepo := dbpkg.NewTickerRepository(db)
 
-	alorClient, err := alor.NewClient(cfg.AlorToken)
+	alorClient, err := alor.NewClient(cfg.AlorRefreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("создание клиента ALOR: %w", err)
 	}

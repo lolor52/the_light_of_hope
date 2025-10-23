@@ -11,8 +11,8 @@ import (
 
 // Config содержит общие параметры приложения.
 type Config struct {
-	DatabaseURL string `json:"DATABASE_URL"`
-	AlorToken   string `json:"alor_token"`
+	DatabaseURL      string `json:"DATABASE_URL"`
+	AlorRefreshToken string `json:"alor_refresh_token"`
 	// TickersFillingSessions определяет количество активных сессий для модуля заполнения истории.
 	TickersFillingSessions int `json:"tickers_filling_sessions"`
 	// TickersFillingMaxInactiveDays ограничивает количество проверяемых дат без активных сессий.
