@@ -112,13 +112,10 @@ func newTickersFillingService(db *sql.DB, cfg config.Config) (*tickers_filling.S
 
 	issClient := moex.NewISSClient(passportClient)
 	valueAreaCalc := indicators.NewCalculator(tickerInfoRepo, issClient)
-	swingCalc := indicators.NewSwingCountPairedCalculator(tickerInfoRepo, issClient, indicators.DefaultSwingCountParams())
-
 	service, err := tickers_filling.NewService(
 		tickerInfoRepo,
 		historyRepo,
 		valueAreaCalc,
-		swingCalc,
 		tickers_filling.Config{
 			SessionsTarget:  cfg.TickersFillingSessions,
 			MaxInactiveDays: cfg.TickersFillingMaxInactiveDays,

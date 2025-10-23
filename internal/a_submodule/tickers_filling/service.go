@@ -25,7 +25,6 @@ type Service struct {
 	tickerInfoRepo *db.TickerInfoRepository
 	historyRepo    *db.TickerRepository
 	valueAreaCalc  *indicators.Calculator
-	swingCalc      *indicators.SwingCountPairedCalculator
 	config         Config
 	now            func() time.Time
 	moscowLoc      *time.Location
@@ -55,10 +54,9 @@ func NewService(
 	tickerInfoRepo *db.TickerInfoRepository,
 	historyRepo *db.TickerRepository,
 	valueAreaCalc *indicators.Calculator,
-	swingCalc *indicators.SwingCountPairedCalculator,
 	cfg Config,
 ) (*Service, error) {
-	if tickerInfoRepo == nil || historyRepo == nil || valueAreaCalc == nil || swingCalc == nil {
+	if tickerInfoRepo == nil || historyRepo == nil || valueAreaCalc == nil {
 		return nil, fmt.Errorf("tickers filling: missing dependencies")
 	}
 
@@ -71,7 +69,6 @@ func NewService(
 		tickerInfoRepo: tickerInfoRepo,
 		historyRepo:    historyRepo,
 		valueAreaCalc:  valueAreaCalc,
-		swingCalc:      swingCalc,
 		config:         cfg,
 		now:            time.Now,
 		moscowLoc:      loc,
@@ -163,7 +160,7 @@ func (s *Service) fillTicker(ctx context.Context, ticker models.TickerInfo, star
 				VWAP:                 sessionData.vwap,
 				VAL:                  sessionData.val,
 				VAH:                  sessionData.vah,
-				SwingCountPaired:     sessionData.swing,
+				SwingCountPaired:     nil,
 			}
 
 			if err := s.historyRepo.Insert(ctx, entity); err != nil {
@@ -194,7 +191,6 @@ type sessionComputation struct {
 	vwap   *string
 	val    *string
 	vah    *string
-	swing  *string
 }
 
 func (s *Service) computeSession(ctx context.Context, tickerInfoID int64, sessionDate time.Time) (sessionComputation, error) {
@@ -208,19 +204,10 @@ func (s *Service) computeSession(ctx context.Context, tickerInfoID int64, sessio
 		return result, fmt.Errorf("calculate value area: %w", err)
 	}
 
-	swingCount, err := s.swingCalc.Calculate(ctx, tickerInfoID, sessionDate)
-	if err != nil {
-		if errors.Is(err, indicators.ErrNoTrades) {
-			return result, nil
-		}
-		return result, fmt.Errorf("calculate swing count paired: %w", err)
-	}
-
 	result.active = true
 	result.vwap = stringPointer(strconv.FormatFloat(valueArea.VWAP, 'f', 6, 64))
 	result.val = stringPointer(strconv.FormatFloat(valueArea.VAL, 'f', 6, 64))
 	result.vah = stringPointer(strconv.FormatFloat(valueArea.VAH, 'f', 6, 64))
-	result.swing = stringPointer(strconv.Itoa(swingCount))
 
 	return result, nil
 }
