@@ -68,15 +68,25 @@ func NewService(infoRepo tickerInfoLister, historyRepo tickerHistoryStore, calc 
 	return svc, nil
 }
 
+// FillStats содержит статистику по обработанным торговым сессиям.
+type FillStats struct {
+	ExistingEntries  int
+	CreatedEntries   int
+	ActiveSessions   int
+	InactiveSessions int
+}
+
 // Fill загружает недостающие данные об основных торговых сессиях для тикеров TQBR.
-func (s *Service) Fill(ctx context.Context) error {
+func (s *Service) Fill(ctx context.Context) (FillStats, error) {
+	var summary FillStats
+
 	if s == nil {
-		return errors.New("tickers_filling: nil service")
+		return summary, errors.New("tickers_filling: nil service")
 	}
 
 	tickers, err := s.tickerInfos.ListAll(ctx)
 	if err != nil {
-		return fmt.Errorf("tickers_filling: list ticker info: %w", err)
+		return summary, fmt.Errorf("tickers_filling: list ticker info: %w", err)
 	}
 
 	startDate := s.yesterdayInMoscow()
@@ -86,12 +96,18 @@ func (s *Service) Fill(ctx context.Context) error {
 			continue
 		}
 
-		if err := s.fillTickerHistory(ctx, info, startDate); err != nil {
-			return err
+		stats, err := s.fillTickerHistory(ctx, info, startDate)
+		if err != nil {
+			return summary, err
 		}
+
+		summary.ExistingEntries += stats.ExistingEntries
+		summary.CreatedEntries += stats.CreatedEntries
+		summary.ActiveSessions += stats.ActiveSessions
+		summary.InactiveSessions += stats.InactiveSessions
 	}
 
-	return nil
+	return summary, nil
 }
 
 func (s *Service) yesterdayInMoscow() time.Time {
@@ -102,12 +118,14 @@ func (s *Service) yesterdayInMoscow() time.Time {
 	return midnight.AddDate(0, 0, -1)
 }
 
-func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo, startDate time.Time) error {
+func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo, startDate time.Time) (FillStats, error) {
+	var stats FillStats
+
 	if s.sessionsLimit <= 0 {
-		return nil
+		return stats, nil
 	}
 	if s.maxInactiveDays <= 0 {
-		return nil
+		return stats, nil
 	}
 
 	activeSessions := 0
@@ -117,13 +135,17 @@ func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo,
 
 		history, err := s.tickerHistory.GetByDateAndName(ctx, info.TickerName, sessionDate)
 		if err == nil {
+			stats.ExistingEntries++
 			if history.TradingSessionActive {
 				activeSessions++
+				stats.ActiveSessions++
+			} else {
+				stats.InactiveSessions++
 			}
 			continue
 		}
 		if !errors.Is(err, db.ErrNotFound) {
-			return fmt.Errorf("tickers_filling: load history %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
+			return stats, fmt.Errorf("tickers_filling: load history %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
 		}
 
 		profile, err := s.calculator.CalculateMainSessionProfile(ctx, info.ID, sessionDate)
@@ -137,10 +159,12 @@ func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo,
 			val = floatToPtr(profile.VAL)
 			vah = floatToPtr(profile.VAH)
 			activeSessions++
+			stats.ActiveSessions++
 		case errors.Is(err, indicators.ErrNoTrades):
 			sessionActive = false
+			stats.InactiveSessions++
 		default:
-			return fmt.Errorf("tickers_filling: calculate session %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
+			return stats, fmt.Errorf("tickers_filling: calculate session %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
 		}
 
 		entity := models.TickerHistory{
@@ -154,11 +178,12 @@ func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo,
 		}
 
 		if err := s.tickerHistory.Insert(ctx, entity); err != nil {
-			return fmt.Errorf("tickers_filling: insert history %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
+			return stats, fmt.Errorf("tickers_filling: insert history %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
 		}
+		stats.CreatedEntries++
 	}
 
-	return nil
+	return stats, nil
 }
 
 func floatToPtr(value float64) *string {

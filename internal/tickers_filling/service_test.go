@@ -104,7 +104,8 @@ func TestServiceFillCreatesActiveSessions(t *testing.T) {
 		return time.Date(2025, 10, 21, 12, 0, 0, 0, moscow)
 	}
 
-	if err := svc.Fill(context.Background()); err != nil {
+	stats, err := svc.Fill(context.Background())
+	if err != nil {
 		t.Fatalf("Fill returned error: %v", err)
 	}
 
@@ -136,6 +137,19 @@ func TestServiceFillCreatesActiveSessions(t *testing.T) {
 	if !entry2.TradingSessionActive {
 		t.Fatalf("expected second session active")
 	}
+
+	if stats.CreatedEntries != 2 {
+		t.Fatalf("expected 2 created entries, got %d", stats.CreatedEntries)
+	}
+	if stats.ActiveSessions != 2 {
+		t.Fatalf("expected 2 active sessions, got %d", stats.ActiveSessions)
+	}
+	if stats.InactiveSessions != 0 {
+		t.Fatalf("expected 0 inactive sessions, got %d", stats.InactiveSessions)
+	}
+	if stats.ExistingEntries != 0 {
+		t.Fatalf("expected 0 existing entries, got %d", stats.ExistingEntries)
+	}
 }
 
 func TestServiceFillCreatesInactiveSession(t *testing.T) {
@@ -156,7 +170,8 @@ func TestServiceFillCreatesInactiveSession(t *testing.T) {
 		return time.Date(2025, 10, 21, 15, 0, 0, 0, moscow)
 	}
 
-	if err := svc.Fill(context.Background()); err != nil {
+	stats, err := svc.Fill(context.Background())
+	if err != nil {
 		t.Fatalf("Fill returned error: %v", err)
 	}
 
@@ -177,6 +192,19 @@ func TestServiceFillCreatesInactiveSession(t *testing.T) {
 	}
 	if !active.TradingSessionActive {
 		t.Fatalf("expected active session")
+	}
+
+	if stats.CreatedEntries != 2 {
+		t.Fatalf("expected 2 created entries, got %d", stats.CreatedEntries)
+	}
+	if stats.ActiveSessions != 1 {
+		t.Fatalf("expected 1 active session, got %d", stats.ActiveSessions)
+	}
+	if stats.InactiveSessions != 1 {
+		t.Fatalf("expected 1 inactive session, got %d", stats.InactiveSessions)
+	}
+	if stats.ExistingEntries != 0 {
+		t.Fatalf("expected 0 existing entries, got %d", stats.ExistingEntries)
 	}
 }
 
@@ -199,11 +227,25 @@ func TestServiceFillSkipsExistingHistory(t *testing.T) {
 		return time.Date(2025, 10, 21, 10, 0, 0, 0, moscow)
 	}
 
-	if err := svc.Fill(context.Background()); err != nil {
+	stats, err := svc.Fill(context.Background())
+	if err != nil {
 		t.Fatalf("Fill returned error: %v", err)
 	}
 
 	if len(historyRepo.entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(historyRepo.entries))
+	}
+
+	if stats.CreatedEntries != 1 {
+		t.Fatalf("expected 1 created entry, got %d", stats.CreatedEntries)
+	}
+	if stats.ExistingEntries != 1 {
+		t.Fatalf("expected 1 existing entry, got %d", stats.ExistingEntries)
+	}
+	if stats.ActiveSessions != 2 {
+		t.Fatalf("expected 2 active sessions, got %d", stats.ActiveSessions)
+	}
+	if stats.InactiveSessions != 0 {
+		t.Fatalf("expected 0 inactive sessions, got %d", stats.InactiveSessions)
 	}
 }
