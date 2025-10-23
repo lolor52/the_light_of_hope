@@ -1,4 +1,17 @@
 {
   // Строка подключения к базе данных PostgreSQL
-  "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/invest_intraday_db?sslmode=disable"
+  "DATABASE_URL": "postgres://postgres:postgres@localhost:5432/invest_intraday_db?sslmode=disable",
+  // Токен доступа к API Alor для получения рыночных данных
+  "alor_token": "bc5f42b1dedc40c3a87005addb5495f8",
+  // Количество торговых сессий, для которых заполняются данные по тикерам
+  "tickers_filling_sessions": 6,
+  // Максимальное количество дней без торгов для продолжения поиска исторических данных
+  "tickers_filling_max_inactive_days": 20,
+  // Количество лучших тикеров, которые нужно отобрать по итоговым баллам
+  "tickers_selection_count": 4,
+  // Учетные данные для авторизации на MOEX Passport
+  "moex_passport": {
+    "login": "ledo02@yandex.ru",
+    "password": "fuLw9pXRn4Bn"
+  }
 }
