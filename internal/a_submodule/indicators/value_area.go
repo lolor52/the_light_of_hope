@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"invest_intraday/internal/a_submodule/alor"
-	"invest_intraday/internal/a_technical/db"
 )
 
 // ErrNoTrades сигнализирует об отсутствии сделок основной сессии.
@@ -40,7 +39,7 @@ var (
 )
 
 // NewCalculator создаёт сервис расчёта метрик.
-func NewCalculator(tickerRepo *db.TickerInfoRepository, marketClient *alor.Client) *Calculator {
+func NewCalculator(tickerRepo tickerInfoProvider, marketClient tradeProvider) *Calculator {
 	return &Calculator{
 		fetcher: newSessionFetcher(tickerRepo, marketClient),
 	}
