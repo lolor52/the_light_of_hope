@@ -9,19 +9,9 @@ import (
 	"strings"
 )
 
-// PassportCredentials содержит логин и пароль для MOEX Passport.
-type PassportCredentials struct {
-	Login    string `json:"login"`
-	Password string `json:"password"`
-}
-
-// Config агрегирует необходимые параметры запуска модуля выбора тикеров.
+// Config содержит общие параметры приложения.
 type Config struct {
-	MOEXPassport                  PassportCredentials `json:"moex_passport"`
-	DatabaseURL                   string              `json:"DATABASE_URL"`
-	TickersFillingSessions        int                 `json:"tickers_filling_sessions"`
-	TickersFillingMaxInactiveDays int                 `json:"tickers_filling_max_inactive_days"`
-	TickersSelectionCount         int                 `json:"tickers_selection_count"`
+        DatabaseURL string `json:"DATABASE_URL"`
 }
 
 // FromFile загружает конфигурацию из указанного JSON-файла.
@@ -42,17 +32,7 @@ func FromFile(path string) (Config, error) {
 		return cfg, fmt.Errorf("decode config: %w", err)
 	}
 
-	if cfg.TickersFillingSessions <= 0 {
-		cfg.TickersFillingSessions = 5
-	}
-	if cfg.TickersFillingMaxInactiveDays <= 0 {
-		cfg.TickersFillingMaxInactiveDays = 20
-	}
-	if cfg.TickersSelectionCount <= 0 {
-		cfg.TickersSelectionCount = 4
-	}
-
-	return cfg, nil
+        return cfg, nil
 }
 
 func removeJSONComments(data []byte) ([]byte, error) {
