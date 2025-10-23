@@ -6,17 +6,25 @@ import (
 	"os"
 
 	"invest_intraday/internal/a_technical/config"
+	"invest_intraday/internal/auth/alor"
 )
 
 func main() {
-	if _, err := loadAppConfig(); err != nil {
+	cfg, err := loadAppConfig()
+	if err != nil {
 		log.Fatalf("не удалось загрузить конфигурацию: %v", err)
+	}
+
+	alorClient, err := alor.NewClient(cfg.AlorRefreshToken)
+	if err != nil {
+		log.Fatalf("не удалось инициализировать Alor-клиент: %v", err)
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	})
+	mux.Handle("/auth/alor/check", alor.NewCheckHandler(alorClient))
 
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {

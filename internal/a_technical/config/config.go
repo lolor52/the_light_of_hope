@@ -11,7 +11,8 @@ import (
 
 // Config содержит параметры приложения, считываемые из JSON-файла.
 type Config struct {
-	DatabaseURL string `json:"DATABASE_URL"`
+	DatabaseURL      string `json:"DATABASE_URL"`
+	AlorRefreshToken string `json:"alor_refresh_token"`
 }
 
 // FromFile загружает конфигурацию из указанного JSON-файла.
