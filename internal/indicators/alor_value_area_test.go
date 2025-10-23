@@ -1,7 +1,12 @@
 package indicators
 
 import (
+	"context"
+	"errors"
 	"math"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,4 +73,89 @@ func TestMainSessionBounds(t *testing.T) {
 	if !end.Equal(expectedEnd) {
 		t.Fatalf("unexpected end: got %v, want %v", end, expectedEnd)
 	}
+}
+
+func TestMarketDataClientFetchTradesInvalidRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("token"); got != "test-token" {
+			t.Fatalf("unexpected token parameter: %q", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("unexpected Authorization header: %q", got)
+		}
+
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewMarketDataClient(server.URL, &stubTokenProvider{token: "test-token"})
+	client.WithHTTPClient(server.Client())
+
+	from := time.Date(2024, 5, 20, 10, 0, 0, 0, time.UTC)
+	to := from.Add(2 * time.Hour)
+
+	_, err := client.FetchTrades(context.Background(), "TQBR", "GAZP", from, to)
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+
+	last := client.LastResponse()
+	if !strings.Contains(last, "status 404") {
+		t.Fatalf("expected status in last response, got %q", last)
+	}
+	if !strings.Contains(last, "token=REDACTED") {
+		t.Fatalf("expected sanitized token in last response, got %q", last)
+	}
+	if strings.Contains(last, "test-token") {
+		t.Fatalf("token leaked in last response: %q", last)
+	}
+}
+
+func TestMarketDataClientFetchTradesNoTrades(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("token"); got != "another-token" {
+			t.Fatalf("unexpected token parameter: %q", got)
+		}
+		if r.URL.Query().Get("from") == "" || r.URL.Query().Get("to") == "" {
+			t.Fatalf("expected time range parameters in request")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewMarketDataClient(server.URL, &stubTokenProvider{token: "another-token"})
+	client.WithHTTPClient(server.Client())
+
+	from := time.Date(2024, 5, 21, 10, 0, 0, 0, time.UTC)
+	to := from.Add(90 * time.Minute)
+
+	_, err := client.FetchTrades(context.Background(), "TQBR", "SBER", from, to)
+	if !errors.Is(err, ErrNoTrades) {
+		t.Fatalf("expected ErrNoTrades, got %v", err)
+	}
+
+	last := client.LastResponse()
+	if !strings.Contains(last, "status 200") {
+		t.Fatalf("expected status 200 in last response, got %q", last)
+	}
+	if !strings.Contains(last, "token=REDACTED") {
+		t.Fatalf("expected sanitized token in last response, got %q", last)
+	}
+	if strings.Contains(last, "another-token") {
+		t.Fatalf("token leaked in last response: %q", last)
+	}
+}
+
+type stubTokenProvider struct {
+	token string
+	err   error
+}
+
+func (s *stubTokenProvider) AccessToken(context.Context) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.token, nil
 }
