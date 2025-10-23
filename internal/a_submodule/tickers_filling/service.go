@@ -76,6 +76,8 @@ func NewService(ctx context.Context, cfg config.Config) (*Service, error) {
 		return nil, fmt.Errorf("load ticker info: %w", err)
 	}
 
+	log.Printf("tickers_filling: загружено %d тикеров для обработки", len(tickerInfos))
+
 	service := &Service{
 		cfg:         cfg,
 		repo:        db.NewTickerRepository(dbConn),
@@ -102,6 +104,10 @@ func (s *Service) Run(ctx context.Context) (RunStats, error) {
 	var pending []pendingRecord
 
 	log.Printf("tickers_filling: запуск модуля")
+	log.Printf(
+		"tickers_filling: начало обработки %d тикеров, целевая глубина %d сессий",
+		len(s.tickerInfos), s.cfg.TickersFillingSessions,
+	)
 
 	loc, err := time.LoadLocation("Europe/Moscow")
 	if err != nil {
@@ -113,6 +119,7 @@ func (s *Service) Run(ctx context.Context) (RunStats, error) {
 	startDate := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -1)
 
 	for _, tickerInfo := range s.tickerInfos {
+		log.Printf("tickers_filling: обработка тикера %s", tickerInfo.TickerName)
 		tickerStats, tickerPending, err := s.processTicker(ctx, tickerInfo, startDate)
 		stats.Existing += tickerStats.Existing
 		stats.Created += tickerStats.Created
@@ -120,16 +127,26 @@ func (s *Service) Run(ctx context.Context) (RunStats, error) {
 			log.Printf("tickers_filling: ошибка при обработке тикера %s: %v", tickerInfo.TickerName, err)
 			continue
 		}
+		log.Printf(
+			"tickers_filling: тикер %s обработан, создано %d записей, найдено %d существующих",
+			tickerInfo.TickerName, tickerStats.Created, tickerStats.Existing,
+		)
 		pending = append(pending, tickerPending...)
 	}
 
 	if len(pending) > 0 {
+		log.Printf("tickers_filling: финализация %d отложенных записей", len(pending))
 		created, err := s.finalizeAndInsertPending(ctx, pending)
 		if err != nil {
 			return stats, err
 		}
 		stats.Created += created
 	}
+
+	log.Printf(
+		"tickers_filling: завершено, создано %d записей, подтверждено %d существующих",
+		stats.Created, stats.Existing,
+	)
 
 	return stats, nil
 }
@@ -143,6 +160,10 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 		log.Printf("tickers_filling: не удалось получить информацию о бумаге %s: %v", tickerCfg.TickerName, err)
 		return stats, nil, fmt.Errorf("security info: %w", err)
 	}
+	log.Printf(
+		"tickers_filling: информация о бумаге %s загружена (лот %d)",
+		tickerCfg.TickerName, securityInfo.LotSize,
+	)
 
 	date := startDate
 	tradingSessionsFound := 0
@@ -163,12 +184,20 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 			if existing.TradingSessionActive {
 				tradingSessionsFound++
 				consecutiveInactiveDays = 0
+				log.Printf(
+					"tickers_filling: запись за %s уже существует для %s (активная)",
+					date.Format("2006-01-02"), tickerCfg.TickerName,
+				)
 			} else if maxInactiveDays > 0 {
 				consecutiveInactiveDays++
 				if consecutiveInactiveDays >= maxInactiveDays {
 					log.Printf("tickers_filling: тикер %s не торговался последние %d дней, остановлено заполнение", tickerCfg.TickerName, maxInactiveDays)
 					return stats, pending, nil
 				}
+				log.Printf(
+					"tickers_filling: запись за %s уже существует для %s (без торгов)",
+					date.Format("2006-01-02"), tickerCfg.TickerName,
+				)
 			}
 			date = date.AddDate(0, 0, -1)
 			continue
@@ -188,6 +217,10 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 		if sessionActive {
 			consecutiveInactiveDays = 0
 			tradingSessionsFound++
+			log.Printf(
+				"tickers_filling: торговая сессия %s %s активна, рассчитываем метрики",
+				tickerCfg.TickerName, date.Format("2006-01-02"),
+			)
 
 			metrics, err := s.collectMetrics(ctx, tickerCfg, securityInfo, *historyRow)
 			if err != nil {
@@ -221,6 +254,10 @@ func (s *Service) processTicker(ctx context.Context, tickerCfg models.TickerInfo
 			TradingSessionActive: false,
 			TickerInfoID:         tickerCfg.ID,
 		}
+		log.Printf(
+			"tickers_filling: торговая сессия %s %s неактивна, сохраняем отсутствие торгов",
+			tickerCfg.TickerName, date.Format("2006-01-02"),
+		)
 		if insertErr := s.repo.Insert(ctx, entity); insertErr != nil {
 			log.Printf("tickers_filling: не удалось вставить запись об отсутствии торгов %s за %s: %v", tickerCfg.TickerName, date.Format("2006-01-02"), insertErr)
 			return stats, nil, insertErr
@@ -249,6 +286,11 @@ type pendingRecord struct {
 
 func (s *Service) collectMetrics(ctx context.Context, tickerCfg models.TickerInfo, securityInfo moex.SecurityInfo, historyRow moex.HistoryRow) (sessionRawMetrics, error) {
 	metrics := sessionRawMetrics{}
+
+	log.Printf(
+		"tickers_filling: сбор метрик для %s за %s",
+		tickerCfg.TickerName, historyRow.TradeDate.Format("2006-01-02"),
+	)
 
 	intervals, err := s.moexClient.GetBoardSessions(ctx, tickerCfg.BoardID, historyRow.TradeDate)
 	if err != nil {
@@ -309,6 +351,15 @@ func (s *Service) collectMetrics(ctx context.Context, tickerCfg models.TickerInf
 		metrics.Liquidity = &liqMetrics
 	}
 
+	log.Printf(
+		"tickers_filling: метрики для %s за %s собраны (vwap=%v, val=%v, vah=%v)",
+		tickerCfg.TickerName,
+		historyRow.TradeDate.Format("2006-01-02"),
+		metrics.VWAP,
+		metrics.VAL,
+		metrics.VAH,
+	)
+
 	return metrics, nil
 }
 
@@ -318,6 +369,8 @@ func (s *Service) finalizeAndInsertPending(ctx context.Context, pending []pendin
 		record := &pending[i]
 		grouped[record.entity.TradingSessionDate] = append(grouped[record.entity.TradingSessionDate], record)
 	}
+
+	log.Printf("tickers_filling: сгруппировано %d дат для постобработки", len(grouped))
 
 	for _, records := range grouped {
 		assignFlatTrendScore(records)
@@ -333,6 +386,8 @@ func (s *Service) finalizeAndInsertPending(ctx context.Context, pending []pendin
 		}
 		created++
 	}
+
+	log.Printf("tickers_filling: вставлено %d записей после постобработки", created)
 
 	return created, nil
 }
@@ -389,6 +444,7 @@ func assignVolatilityScore(records []*pendingRecord) {
 func (s *Service) securityInfo(ctx context.Context, tickerCfg models.TickerInfo) (moex.SecurityInfo, error) {
 	key := tickerCfg.TickerName
 	if info, ok := s.securityMap[key]; ok {
+		log.Printf("tickers_filling: использована кэшированная информация о бумаге %s", tickerCfg.TickerName)
 		return info, nil
 	}
 	info, err := s.moexClient.GetSecurityInfo(ctx, tickerCfg.BoardID, tickerCfg.SecID)
@@ -396,6 +452,7 @@ func (s *Service) securityInfo(ctx context.Context, tickerCfg models.TickerInfo)
 		log.Printf("tickers_filling: не удалось получить SecurityInfo для %s: %v", tickerCfg.TickerName, err)
 		return moex.SecurityInfo{}, err
 	}
+	log.Printf("tickers_filling: получена информация о бумаге %s из MOEX", tickerCfg.TickerName)
 	s.securityMap[key] = info
 	return info, nil
 }
@@ -409,6 +466,10 @@ func (s *Service) prevTradingDay(ctx context.Context, tickerCfg models.TickerInf
 			return nil, err
 		}
 		if row != nil && row.Volume > 0 {
+			log.Printf(
+				"tickers_filling: предыдущая активная сессия %s найдена (%s)",
+				tickerCfg.TickerName, row.TradeDate.Format("2006-01-02"),
+			)
 			return row, nil
 		}
 		date = date.AddDate(0, 0, -1)
