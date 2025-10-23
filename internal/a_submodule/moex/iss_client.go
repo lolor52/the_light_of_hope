@@ -3,6 +3,7 @@ package moex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -25,6 +26,14 @@ type BoardMetadata struct {
 	Market string
 }
 
+var (
+	errBoardNotFound = errors.New("moex iss board not found")
+
+	boardHints = map[string]BoardMetadata{
+		"TQBR": {Engine: "stock", Market: "shares"},
+	}
+)
+
 // Trade описывает отдельную сделку из ISS.
 type Trade struct {
 	Price          float64
@@ -41,46 +50,63 @@ func NewISSClient(passport *PassportClient) *ISSClient {
 
 // BoardMetadata загружает параметры движка и рынка по идентификатору площадки.
 func (c *ISSClient) BoardMetadata(ctx context.Context, boardID string) (BoardMetadata, error) {
-	endpoint := fmt.Sprintf("%s/boards/%s.json", issBaseURL, url.PathEscape(strings.ToUpper(boardID)))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	boardID = strings.ToUpper(boardID)
+
+	type boardKey struct {
+		engine string
+		market string
+	}
+
+	tried := make(map[boardKey]struct{})
+	tryCombination := func(engine, market string) (BoardMetadata, error) {
+		key := boardKey{engine: strings.ToLower(engine), market: strings.ToLower(market)}
+		if _, ok := tried[key]; ok {
+			return BoardMetadata{}, errBoardNotFound
+		}
+		tried[key] = struct{}{}
+
+		meta, err := c.boardMetadataForEngineMarket(ctx, engine, market, boardID)
+		if err != nil {
+			return BoardMetadata{}, err
+		}
+		meta.Engine = strings.ToLower(meta.Engine)
+		meta.Market = strings.ToLower(meta.Market)
+		return meta, nil
+	}
+
+	if hint, ok := boardHints[boardID]; ok {
+		meta, err := tryCombination(hint.Engine, hint.Market)
+		if err == nil {
+			return meta, nil
+		}
+		if !errors.Is(err, errBoardNotFound) {
+			return BoardMetadata{}, fmt.Errorf("moex iss board: %w", err)
+		}
+	}
+
+	engines, err := c.listEngines(ctx)
 	if err != nil {
-		return BoardMetadata{}, fmt.Errorf("moex iss board request: %w", err)
+		return BoardMetadata{}, fmt.Errorf("moex iss board: load engines: %w", err)
 	}
 
-	resp, err := c.passport.Do(ctx, req)
-	if err != nil {
-		return BoardMetadata{}, fmt.Errorf("moex iss board call: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return BoardMetadata{}, fmt.Errorf("moex iss board status: %s", resp.Status)
-	}
-
-	var payload struct {
-		Boards issTable `json:"boards"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return BoardMetadata{}, fmt.Errorf("moex iss board decode: %w", err)
-	}
-	if len(payload.Boards.Data) == 0 {
-		return BoardMetadata{}, fmt.Errorf("moex iss board: board %s not found", boardID)
+	for _, engine := range engines {
+		markets, err := c.listMarkets(ctx, engine)
+		if err != nil {
+			return BoardMetadata{}, fmt.Errorf("moex iss board: load markets for engine %s: %w", engine, err)
+		}
+		for _, market := range markets {
+			meta, err := tryCombination(engine, market)
+			if err == nil {
+				return meta, nil
+			}
+			if errors.Is(err, errBoardNotFound) {
+				continue
+			}
+			return BoardMetadata{}, fmt.Errorf("moex iss board: load board %s/%s: %w", engine, market, err)
+		}
 	}
 
-	columns := payload.Boards.columnsIndex()
-	engine, err := payload.Boards.valueString(columns, "engine", 0)
-	if err != nil {
-		return BoardMetadata{}, err
-	}
-	market, err := payload.Boards.valueString(columns, "market", 0)
-	if err != nil {
-		return BoardMetadata{}, err
-	}
-
-	return BoardMetadata{
-		Engine: engine,
-		Market: market,
-	}, nil
+	return BoardMetadata{}, fmt.Errorf("moex iss board: board %s not found", boardID)
 }
 
 // Trades возвращает сделки за указанный день.
@@ -174,6 +200,170 @@ func (c *ISSClient) Trades(ctx context.Context, meta BoardMetadata, boardID, sec
 	}
 
 	return result, nil
+}
+
+func (c *ISSClient) boardMetadataForEngineMarket(ctx context.Context, engine, market, boardID string) (BoardMetadata, error) {
+	endpoint := fmt.Sprintf("%s/engines/%s/markets/%s/boards/%s.json",
+		issBaseURL,
+		url.PathEscape(strings.ToLower(engine)),
+		url.PathEscape(strings.ToLower(market)),
+		url.PathEscape(strings.ToUpper(boardID)),
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return BoardMetadata{}, fmt.Errorf("board request: %w", err)
+	}
+
+	resp, err := c.passport.Do(ctx, req)
+	if err != nil {
+		return BoardMetadata{}, fmt.Errorf("board call: %w", err)
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		resp.Body.Close()
+		return BoardMetadata{}, errBoardNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return BoardMetadata{}, fmt.Errorf("board status: %s", resp.Status)
+	}
+	defer resp.Body.Close()
+
+	var payload struct {
+		Boards issTable `json:"boards"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return BoardMetadata{}, fmt.Errorf("board decode: %w", err)
+	}
+	if len(payload.Boards.Data) == 0 {
+		return BoardMetadata{}, errBoardNotFound
+	}
+
+	columns := payload.Boards.columnsIndex()
+
+	engineValue := engine
+	if _, ok := columns["engine"]; ok {
+		if value, err := payload.Boards.valueString(columns, "engine", 0); err == nil && value != "" {
+			engineValue = value
+		}
+	}
+
+	marketValue := market
+	if _, ok := columns["market"]; ok {
+		if value, err := payload.Boards.valueString(columns, "market", 0); err == nil && value != "" {
+			marketValue = value
+		}
+	}
+
+	return BoardMetadata{
+		Engine: engineValue,
+		Market: marketValue,
+	}, nil
+}
+
+func (c *ISSClient) listEngines(ctx context.Context) ([]string, error) {
+	endpoint := fmt.Sprintf("%s/engines.json", issBaseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("engines request: %w", err)
+	}
+
+	resp, err := c.passport.Do(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("engines call: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("engines status: %s", resp.Status)
+	}
+	defer resp.Body.Close()
+
+	var payload struct {
+		Engines issTable `json:"engines"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("engines decode: %w", err)
+	}
+
+	columns := payload.Engines.columnsIndex()
+	columnName := "name"
+	if _, ok := columns[columnName]; !ok {
+		if _, ok := columns["engine"]; ok {
+			columnName = "engine"
+		} else {
+			return nil, fmt.Errorf("engines: column name not found")
+		}
+	}
+
+	var engines []string
+	for i := range payload.Engines.Data {
+		name, err := payload.Engines.valueString(columns, columnName, i)
+		if err != nil {
+			return nil, err
+		}
+		if name == "" {
+			continue
+		}
+		engines = append(engines, strings.ToLower(name))
+	}
+
+	if len(engines) == 0 {
+		return nil, fmt.Errorf("engines: empty list")
+	}
+
+	return engines, nil
+}
+
+func (c *ISSClient) listMarkets(ctx context.Context, engine string) ([]string, error) {
+	endpoint := fmt.Sprintf("%s/engines/%s/markets.json", issBaseURL, url.PathEscape(strings.ToLower(engine)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("markets request: %w", err)
+	}
+
+	resp, err := c.passport.Do(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("markets call: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("markets status: %s", resp.Status)
+	}
+	defer resp.Body.Close()
+
+	var payload struct {
+		Markets issTable `json:"markets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("markets decode: %w", err)
+	}
+
+	columns := payload.Markets.columnsIndex()
+	columnName := "market"
+	if _, ok := columns[columnName]; !ok {
+		if _, ok := columns["name"]; ok {
+			columnName = "name"
+		} else {
+			return nil, fmt.Errorf("markets: column market not found")
+		}
+	}
+
+	var markets []string
+	for i := range payload.Markets.Data {
+		name, err := payload.Markets.valueString(columns, columnName, i)
+		if err != nil {
+			return nil, err
+		}
+		if name == "" {
+			continue
+		}
+		markets = append(markets, strings.ToLower(name))
+	}
+
+	if len(markets) == 0 {
+		return nil, fmt.Errorf("markets: empty list")
+	}
+
+	return markets, nil
 }
 
 type issTable struct {
