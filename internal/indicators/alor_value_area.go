@@ -31,6 +31,9 @@ const (
 // ErrNoTrades означает, что для указанной сессии не найдено сделок.
 var ErrNoTrades = errors.New("indicators: no trades in main session")
 
+// ErrInvalidRequest сигнализирует о неверных параметрах запроса маркет-даты.
+var ErrInvalidRequest = errors.New("indicators: invalid market data request")
+
 // TokenProvider описывает зависимость, способную предоставить access-token Alor.
 type TokenProvider interface {
 	AccessToken(ctx context.Context) (string, error)
@@ -176,43 +179,38 @@ func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string,
 	q := req.URL.Query()
 	q.Set("from", from.Format(time.RFC3339))
 	q.Set("to", to.Format(time.RFC3339))
+	q.Set("token", token)
 	req.URL.RawQuery = q.Encode()
-	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		c.lastResponse = fmt.Sprintf("request error: %v", err)
+		c.lastResponse = fmt.Sprintf("request error %s: %v", sanitizeURL(req.URL), err)
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusNoContent, http.StatusNotFound:
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		c.lastResponse = truncateForLog(body)
-		if len(body) == 0 {
-			c.lastResponse = fmt.Sprintf("status %d without body", resp.StatusCode)
-		}
-		return nil, ErrNoTrades
-	default:
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		c.lastResponse = truncateForLog(body)
-		return nil, fmt.Errorf("alor market data: unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.lastResponse = fmt.Sprintf("read body error: %v", err)
+		c.lastResponse = fmt.Sprintf("read body error %s: %v", sanitizeURL(resp.Request.URL), err)
 		return nil, fmt.Errorf("read response: %w", err)
 	}
-	c.lastResponse = truncateForLog(body)
+	c.lastResponse = formatLastResponse(resp, body)
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNoContent:
+		return nil, ErrNoTrades
+	case http.StatusNotFound, http.StatusBadRequest:
+		return nil, fmt.Errorf("%w: status %d", ErrInvalidRequest, resp.StatusCode)
+	default:
+		return nil, fmt.Errorf("alor market data: unexpected status %d: %s", resp.StatusCode, truncateForLog(body))
+	}
 
 	var payload []map[string]any
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&payload); err != nil {
 		if errors.Is(err, io.EOF) {
-			if len(body) == 0 {
-				c.lastResponse = "empty body"
+			if len(bytes.TrimSpace(body)) == 0 {
+				c.lastResponse = formatLastResponse(resp, body)
 			}
 			return nil, ErrNoTrades
 		}
@@ -251,6 +249,21 @@ func (c *MarketDataClient) LastResponse() string {
 	return c.lastResponse
 }
 
+func formatLastResponse(resp *http.Response, body []byte) string {
+	if resp == nil {
+		return truncateForLog(body)
+	}
+
+	sanitizedURL := sanitizeURL(resp.Request.URL)
+	snippet := truncateForLog(body)
+
+	if sanitizedURL == "" {
+		return fmt.Sprintf("status %d body=%s", resp.StatusCode, snippet)
+	}
+
+	return fmt.Sprintf("status %d url=%s body=%s", resp.StatusCode, sanitizedURL, snippet)
+}
+
 func truncateForLog(data []byte) string {
 	const maxLen = 512
 	text := strings.TrimSpace(string(data))
@@ -259,6 +272,21 @@ func truncateForLog(data []byte) string {
 	}
 
 	return text[:maxLen] + "..."
+}
+
+func sanitizeURL(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+
+	clone := *u
+	query := clone.Query()
+	if _, ok := query["token"]; ok {
+		query.Set("token", "REDACTED")
+	}
+	clone.RawQuery = query.Encode()
+
+	return clone.String()
 }
 
 func extractFloat(item map[string]any, keys ...string) (float64, bool) {

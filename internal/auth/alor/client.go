@@ -252,15 +252,20 @@ func (c *Client) queryOrderBook(ctx context.Context, token string) (bool, bool, 
 		return false, false, errors.New("alor: empty access token")
 	}
 
-	endpoint := strings.TrimRight(c.env.APIURL, "/") + "/md/v2/orderbooks/MOEX/SBER?depth=1&format=Simple"
+	endpoint := strings.TrimRight(c.env.APIURL, "/") + "/md/v2/orderbooks/MOEX/SBER"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return false, false, fmt.Errorf("create orderbook request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
+
+	q := req.URL.Query()
+	q.Set("depth", "1")
+	q.Set("format", "Simple")
+	q.Set("token", token)
+	req.URL.RawQuery = q.Encode()
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
