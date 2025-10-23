@@ -13,6 +13,10 @@ import (
 type Config struct {
 	DatabaseURL  string              `json:"DATABASE_URL"`
 	MoexPassport PassportCredentials `json:"moex_passport"`
+	// TickersFillingSessions определяет количество активных сессий для модуля заполнения истории.
+	TickersFillingSessions int `json:"tickers_filling_sessions"`
+	// TickersFillingMaxInactiveDays ограничивает количество проверяемых дат без активных сессий.
+	TickersFillingMaxInactiveDays int `json:"tickers_filling_max_inactive_days"`
 }
 
 // PassportCredentials описывают логин и пароль для MOEX Passport.
