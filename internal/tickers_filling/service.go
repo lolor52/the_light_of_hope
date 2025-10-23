@@ -28,14 +28,6 @@ type sessionCalculator interface {
 	CalculateMainSessionProfile(ctx context.Context, tickerInfoID int64, sessionDate time.Time) (indicators.SessionProfile, error)
 }
 
-// Summary содержит агрегированную статистику по операциям заполнения истории.
-type Summary struct {
-	ExistingRecords  int
-	CreatedRecords   int
-	ActiveSessions   int
-	InactiveSessions int
-}
-
 // Service отвечает за заполнение данных об исторических торговых сессиях тикеров.
 type Service struct {
 	tickerInfos     tickerInfoLister
@@ -77,16 +69,14 @@ func NewService(infoRepo tickerInfoLister, historyRepo tickerHistoryStore, calc 
 }
 
 // Fill загружает недостающие данные об основных торговых сессиях для тикеров TQBR.
-func (s *Service) Fill(ctx context.Context) (Summary, error) {
-	var total Summary
-
+func (s *Service) Fill(ctx context.Context) error {
 	if s == nil {
-		return total, errors.New("tickers_filling: nil service")
+		return errors.New("tickers_filling: nil service")
 	}
 
 	tickers, err := s.tickerInfos.ListAll(ctx)
 	if err != nil {
-		return total, fmt.Errorf("tickers_filling: list ticker info: %w", err)
+		return fmt.Errorf("tickers_filling: list ticker info: %w", err)
 	}
 
 	startDate := s.yesterdayInMoscow()
@@ -96,14 +86,12 @@ func (s *Service) Fill(ctx context.Context) (Summary, error) {
 			continue
 		}
 
-		summary, err := s.fillTickerHistory(ctx, info, startDate)
-		if err != nil {
-			return total, err
+		if err := s.fillTickerHistory(ctx, info, startDate); err != nil {
+			return err
 		}
-		total = total.merge(summary)
 	}
 
-	return total, nil
+	return nil
 }
 
 func (s *Service) yesterdayInMoscow() time.Time {
@@ -114,14 +102,12 @@ func (s *Service) yesterdayInMoscow() time.Time {
 	return midnight.AddDate(0, 0, -1)
 }
 
-func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo, startDate time.Time) (Summary, error) {
-	var summary Summary
-
+func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo, startDate time.Time) error {
 	if s.sessionsLimit <= 0 {
-		return summary, nil
+		return nil
 	}
 	if s.maxInactiveDays <= 0 {
-		return summary, nil
+		return nil
 	}
 
 	activeSessions := 0
@@ -133,15 +119,11 @@ func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo,
 		if err == nil {
 			if history.TradingSessionActive {
 				activeSessions++
-				summary.ActiveSessions++
-			} else {
-				summary.InactiveSessions++
 			}
-			summary.ExistingRecords++
 			continue
 		}
 		if !errors.Is(err, db.ErrNotFound) {
-			return summary, fmt.Errorf("tickers_filling: load history %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
+			return fmt.Errorf("tickers_filling: load history %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
 		}
 
 		profile, err := s.calculator.CalculateMainSessionProfile(ctx, info.ID, sessionDate)
@@ -155,12 +137,10 @@ func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo,
 			val = floatToPtr(profile.VAL)
 			vah = floatToPtr(profile.VAH)
 			activeSessions++
-			summary.ActiveSessions++
 		case errors.Is(err, indicators.ErrNoTrades):
 			sessionActive = false
-			summary.InactiveSessions++
 		default:
-			return summary, fmt.Errorf("tickers_filling: calculate session %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
+			return fmt.Errorf("tickers_filling: calculate session %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
 		}
 
 		entity := models.TickerHistory{
@@ -174,25 +154,15 @@ func (s *Service) fillTickerHistory(ctx context.Context, info models.TickerInfo,
 		}
 
 		if err := s.tickerHistory.Insert(ctx, entity); err != nil {
-			return summary, fmt.Errorf("tickers_filling: insert history %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
+			return fmt.Errorf("tickers_filling: insert history %s %s: %w", info.TickerName, sessionDate.Format("2006-01-02"), err)
 		}
-		summary.CreatedRecords++
 	}
 
-	return summary, nil
+	return nil
 }
 
 func floatToPtr(value float64) *string {
 	text := strconv.FormatFloat(value, 'f', -1, 64)
 
 	return &text
-}
-
-func (s Summary) merge(other Summary) Summary {
-	return Summary{
-		ExistingRecords:  s.ExistingRecords + other.ExistingRecords,
-		CreatedRecords:   s.CreatedRecords + other.CreatedRecords,
-		ActiveSessions:   s.ActiveSessions + other.ActiveSessions,
-		InactiveSessions: s.InactiveSessions + other.InactiveSessions,
-	}
 }
