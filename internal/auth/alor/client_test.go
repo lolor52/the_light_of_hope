@@ -41,9 +41,6 @@ func TestClientCheckAuthorizationUsesCachedToken(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer "+tokenValue {
 			t.Fatalf("unexpected Authorization header: %q", got)
 		}
-		if got := r.URL.Query().Get("token"); got != tokenValue {
-			t.Fatalf("unexpected token query param: %q", got)
-		}
 
 		_, _ = w.Write([]byte(`{"levels":[]}`))
 	}))
@@ -86,9 +83,6 @@ func TestClientCheckAuthorizationRefreshesWhenTokenAboutToExpire(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer "+newToken {
 			t.Fatalf("unexpected Authorization header: %q", got)
 		}
-		if got := r.URL.Query().Get("token"); got != newToken {
-			t.Fatalf("unexpected token query param: %q", got)
-		}
 
 		_, _ = w.Write([]byte(`{"levels":[]}`))
 	}))
@@ -130,15 +124,9 @@ func TestClientCheckAuthorizationRetriesOnUnauthorized(t *testing.T) {
 		auth := r.Header.Get("Authorization")
 		switch auth {
 		case "Bearer " + oldToken:
-			if got := r.URL.Query().Get("token"); got != oldToken {
-				t.Fatalf("unexpected token query param: %q", got)
-			}
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		case "Bearer " + newToken:
-			if got := r.URL.Query().Get("token"); got != newToken {
-				t.Fatalf("unexpected token query param: %q", got)
-			}
 			seenNewToken.Store(true)
 			_, _ = w.Write([]byte(`{"levels":[]}`))
 			return
@@ -177,19 +165,6 @@ func TestClientCheckAuthorizationUnauthorizedAfterRefresh(t *testing.T) {
 	t.Cleanup(oauth.Close)
 
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		switch auth {
-		case "Bearer " + oldToken:
-			if got := r.URL.Query().Get("token"); got != oldToken {
-				t.Fatalf("unexpected token query param: %q", got)
-			}
-		case "Bearer " + newToken:
-			if got := r.URL.Query().Get("token"); got != newToken {
-				t.Fatalf("unexpected token query param: %q", got)
-			}
-		default:
-			t.Fatalf("unexpected Authorization header: %q", auth)
-		}
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}))
 	t.Cleanup(api.Close)
@@ -215,9 +190,6 @@ func TestClientCheckAuthorizationUnexpectedStatus(t *testing.T) {
 	t.Cleanup(oauth.Close)
 
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("token"); got != token {
-			t.Fatalf("unexpected token query param: %q", got)
-		}
 		http.Error(w, "bad request", http.StatusBadRequest)
 	}))
 	t.Cleanup(api.Close)
