@@ -131,7 +131,6 @@ func (c *ISSClient) Trades(ctx context.Context, meta BoardMetadata, boardID, sec
 
 		columns := payload.Trades.columnsIndex()
 		for i := range payload.Trades.Data {
-			row := payload.Trades.Data[i]
 			price, err := payload.Trades.valueFloat(columns, "price", i)
 			if err != nil {
 				return nil, err
@@ -144,7 +143,10 @@ func (c *ISSClient) Trades(ctx context.Context, meta BoardMetadata, boardID, sec
 			if err != nil {
 				value = price * quantity
 			}
-			session := payload.Trades.valueString(columns, "tradingsession", i)
+			session, err := payload.Trades.valueString(columns, "tradingsession", i)
+			if err != nil {
+				return nil, err
+			}
 			tradeTime, _ := payload.Trades.valueString(columns, "tradetime", i)
 
 			result = append(result, Trade{
