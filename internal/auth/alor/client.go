@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -195,11 +196,17 @@ func (c *Client) requestAccessToken(ctx context.Context) (string, time.Time, err
 	}
 	req.Header.Set("Accept", "application/json")
 
+	sanitizedURL := sanitizeURLForLog(req.URL.String())
+	log.Printf("alor: отправка запроса %s %s", req.Method, sanitizedURL)
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		log.Printf("alor: ошибка запроса %s %s: %v", req.Method, sanitizedURL, err)
 		return "", time.Time{}, fmt.Errorf("request access token: %w", err)
 	}
 	defer resp.Body.Close()
+
+	log.Printf("alor: получен ответ %s %s: статус %d", req.Method, sanitizedURL, resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -248,11 +255,17 @@ func (c *Client) queryOrderBook(ctx context.Context, token string) (bool, bool, 
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
 
+	sanitizedURL := sanitizeURLForLog(req.URL.String())
+	log.Printf("alor: отправка запроса %s %s", req.Method, sanitizedURL)
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		log.Printf("alor: ошибка запроса %s %s: %v", req.Method, sanitizedURL, err)
 		return false, false, fmt.Errorf("request orderbook: %w", err)
 	}
 	defer resp.Body.Close()
+
+	log.Printf("alor: получен ответ %s %s: статус %d", req.Method, sanitizedURL, resp.StatusCode)
 
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -268,6 +281,21 @@ func (c *Client) queryOrderBook(ctx context.Context, token string) (bool, bool, 
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return false, false, fmt.Errorf("unexpected orderbook status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
+}
+
+func sanitizeURLForLog(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+
+	query := parsed.Query()
+	if query.Has("token") {
+		query.Set("token", "REDACTED")
+		parsed.RawQuery = query.Encode()
+	}
+
+	return parsed.String()
 }
 
 func parseJWTExpiration(token string) (time.Time, error) {
