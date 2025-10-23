@@ -9,14 +9,9 @@ import (
 	"strings"
 )
 
-// Config содержит общие параметры приложения.
+// Config содержит параметры приложения, считываемые из JSON-файла.
 type Config struct {
-	DatabaseURL      string `json:"DATABASE_URL"`
-	AlorRefreshToken string `json:"alor_refresh_token"`
-	// TickersFillingSessions определяет количество активных сессий для модуля заполнения истории.
-	TickersFillingSessions int `json:"tickers_filling_sessions"`
-	// TickersFillingMaxInactiveDays ограничивает количество проверяемых дат без активных сессий.
-	TickersFillingMaxInactiveDays int `json:"tickers_filling_max_inactive_days"`
+	DatabaseURL string `json:"DATABASE_URL"`
 }
 
 // FromFile загружает конфигурацию из указанного JSON-файла.
