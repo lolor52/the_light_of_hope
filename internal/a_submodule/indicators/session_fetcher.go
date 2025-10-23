@@ -4,34 +4,29 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
-	"invest_intraday/internal/a_submodule/moex"
+	"invest_intraday/internal/a_submodule/alor"
 	"invest_intraday/internal/a_technical/db"
 	"invest_intraday/models"
 )
 
 type sessionFetcher struct {
 	tickerRepo *db.TickerInfoRepository
-	issClient  *moex.ISSClient
-
-	boardCache map[string]moex.BoardMetadata
-	cacheMu    sync.Mutex
+	alorClient *alor.Client
 }
 
-func newSessionFetcher(tickerRepo *db.TickerInfoRepository, issClient *moex.ISSClient) *sessionFetcher {
-	if tickerRepo == nil || issClient == nil {
+func newSessionFetcher(tickerRepo *db.TickerInfoRepository, alorClient *alor.Client) *sessionFetcher {
+	if tickerRepo == nil || alorClient == nil {
 		return nil
 	}
 	return &sessionFetcher{
 		tickerRepo: tickerRepo,
-		issClient:  issClient,
-		boardCache: make(map[string]moex.BoardMetadata),
+		alorClient: alorClient,
 	}
 }
 
-func (f *sessionFetcher) mainSessionTrades(ctx context.Context, tickerInfoID int64, sessionDate time.Time) (models.TickerInfo, []moex.Trade, error) {
+func (f *sessionFetcher) mainSessionTrades(ctx context.Context, tickerInfoID int64, sessionDate time.Time) (models.TickerInfo, []alor.Trade, error) {
 	if f == nil {
 		return models.TickerInfo{}, nil, fmt.Errorf("session fetcher is not configured")
 	}
@@ -41,12 +36,8 @@ func (f *sessionFetcher) mainSessionTrades(ctx context.Context, tickerInfoID int
 		return models.TickerInfo{}, nil, fmt.Errorf("load ticker info: %w", err)
 	}
 
-	board, err := f.boardMetadata(ctx, info.BoardID)
-	if err != nil {
-		return models.TickerInfo{}, nil, fmt.Errorf("load board metadata: %w", err)
-	}
-
-	trades, err := f.issClient.Trades(ctx, board, info.BoardID, info.SecID, sessionDate)
+	instrument := f.instrumentFromInfo(info)
+	trades, err := f.alorClient.Trades(ctx, instrument, sessionDate)
 	if err != nil {
 		return models.TickerInfo{}, nil, fmt.Errorf("load trades: %w", err)
 	}
@@ -59,24 +50,22 @@ func (f *sessionFetcher) mainSessionTrades(ctx context.Context, tickerInfoID int
 	return info, mainTrades, nil
 }
 
-func (f *sessionFetcher) boardMetadata(ctx context.Context, boardID string) (moex.BoardMetadata, error) {
-	boardID = strings.ToUpper(boardID)
-
-	f.cacheMu.Lock()
-	board, ok := f.boardCache[boardID]
-	f.cacheMu.Unlock()
-	if ok {
-		return board, nil
+func (f *sessionFetcher) instrumentFromInfo(info models.TickerInfo) alor.Instrument {
+	exchange := alor.ExchangeMOEX
+	board := strings.ToUpper(strings.TrimSpace(info.BoardID))
+	if strings.HasPrefix(board, "SPB") {
+		exchange = alor.ExchangeSPB
 	}
 
-	board, err := f.issClient.BoardMetadata(ctx, boardID)
-	if err != nil {
-		return moex.BoardMetadata{}, err
+	symbol := strings.TrimSpace(info.SecID)
+	if symbol == "" {
+		symbol = strings.TrimSpace(info.TickerName)
 	}
+	symbol = strings.ToUpper(symbol)
 
-	f.cacheMu.Lock()
-	f.boardCache[boardID] = board
-	f.cacheMu.Unlock()
-
-	return board, nil
+	return alor.Instrument{
+		Exchange: exchange,
+		Board:    board,
+		Symbol:   symbol,
+	}
 }

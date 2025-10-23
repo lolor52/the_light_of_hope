@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"invest_intraday/internal/a_submodule/moex"
+	"invest_intraday/internal/a_submodule/alor"
 	"invest_intraday/internal/a_technical/db"
 )
 
@@ -40,9 +40,9 @@ var (
 )
 
 // NewCalculator создаёт сервис расчёта метрик.
-func NewCalculator(tickerRepo *db.TickerInfoRepository, issClient *moex.ISSClient) *Calculator {
+func NewCalculator(tickerRepo *db.TickerInfoRepository, marketClient *alor.Client) *Calculator {
 	return &Calculator{
-		fetcher: newSessionFetcher(tickerRepo, issClient),
+		fetcher: newSessionFetcher(tickerRepo, marketClient),
 	}
 }
 
@@ -71,12 +71,12 @@ func (c *Calculator) Calculate(ctx context.Context, tickerInfoID int64, sessionD
 	}, nil
 }
 
-func filterMainSession(trades []moex.Trade) ([]moex.Trade, error) {
+func filterMainSession(trades []alor.Trade) ([]alor.Trade, error) {
 	if len(trades) == 0 {
 		return nil, ErrNoTrades
 	}
 
-	var filtered []moex.Trade
+	var filtered []alor.Trade
 	for _, trade := range trades {
 		if isMainSessionTrade(trade) {
 			filtered = append(filtered, trade)
@@ -90,7 +90,7 @@ func filterMainSession(trades []moex.Trade) ([]moex.Trade, error) {
 	return filtered, nil
 }
 
-func isMainSessionTrade(trade moex.Trade) bool {
+func isMainSessionTrade(trade alor.Trade) bool {
 	session := strings.ToUpper(strings.TrimSpace(trade.TradingSession))
 	switch session {
 	case "P6", "EVENING", "NIGHT", "AFTERHOURS":
@@ -135,7 +135,7 @@ func parseMoscowTime(value string) (time.Time, error) {
 	return parsed, nil
 }
 
-func calculateVWAP(trades []moex.Trade) (float64, error) {
+func calculateVWAP(trades []alor.Trade) (float64, error) {
 	var totalValue float64
 	var totalVolume float64
 
@@ -158,7 +158,7 @@ func calculateVWAP(trades []moex.Trade) (float64, error) {
 	return totalValue / totalVolume, nil
 }
 
-func calculateValueArea(trades []moex.Trade) (float64, float64) {
+func calculateValueArea(trades []alor.Trade) (float64, float64) {
 	volumeByPrice := make(map[float64]float64)
 	var totalVolume float64
 	for _, trade := range trades {

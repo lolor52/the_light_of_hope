@@ -11,18 +11,12 @@ import (
 
 // Config содержит общие параметры приложения.
 type Config struct {
-	DatabaseURL  string              `json:"DATABASE_URL"`
-	MoexPassport PassportCredentials `json:"moex_passport"`
+	DatabaseURL string `json:"DATABASE_URL"`
+	AlorToken   string `json:"alor_token"`
 	// TickersFillingSessions определяет количество активных сессий для модуля заполнения истории.
 	TickersFillingSessions int `json:"tickers_filling_sessions"`
 	// TickersFillingMaxInactiveDays ограничивает количество проверяемых дат без активных сессий.
 	TickersFillingMaxInactiveDays int `json:"tickers_filling_max_inactive_days"`
-}
-
-// PassportCredentials описывают логин и пароль для MOEX Passport.
-type PassportCredentials struct {
-	Login    string `json:"login"`
-	Password string `json:"password"`
 }
 
 // FromFile загружает конфигурацию из указанного JSON-файла.

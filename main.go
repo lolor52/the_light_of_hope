@@ -12,8 +12,8 @@ import (
 
 	_ "github.com/lib/pq"
 
+	"invest_intraday/internal/a_submodule/alor"
 	"invest_intraday/internal/a_submodule/indicators"
-	"invest_intraday/internal/a_submodule/moex"
 	"invest_intraday/internal/a_submodule/tickers_filling"
 	"invest_intraday/internal/a_technical/config"
 	dbpkg "invest_intraday/internal/a_technical/db"
@@ -102,16 +102,12 @@ func newTickersFillingService(db *sql.DB, cfg config.Config) (*tickers_filling.S
 	tickerInfoRepo := dbpkg.NewTickerInfoRepository(db)
 	historyRepo := dbpkg.NewTickerRepository(db)
 
-	passportClient, err := moex.NewPassportClient(moex.Credentials{
-		Login:    cfg.MoexPassport.Login,
-		Password: cfg.MoexPassport.Password,
-	})
+	alorClient, err := alor.NewClient(cfg.AlorToken)
 	if err != nil {
-		return nil, fmt.Errorf("создание клиента MOEX Passport: %w", err)
+		return nil, fmt.Errorf("создание клиента ALOR: %w", err)
 	}
 
-	issClient := moex.NewISSClient(passportClient)
-	valueAreaCalc := indicators.NewCalculator(tickerInfoRepo, issClient)
+	valueAreaCalc := indicators.NewCalculator(tickerInfoRepo, alorClient)
 	service, err := tickers_filling.NewService(
 		tickerInfoRepo,
 		historyRepo,

@@ -8,10 +8,5 @@
   // Максимальное количество дней без торгов для продолжения поиска исторических данных
   "tickers_filling_max_inactive_days": 20,
   // Количество лучших тикеров, которые нужно отобрать по итоговым баллам
-  "tickers_selection_count": 4,
-  // Учетные данные для авторизации на MOEX Passport
-  "moex_passport": {
-    "login": "ledo02@yandex.ru",
-    "password": "fuL-w9p-XRn-4Bn"
-  }
+  "tickers_selection_count": 4
 }
