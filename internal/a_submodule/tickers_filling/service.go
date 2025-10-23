@@ -176,6 +176,14 @@ func (s *Service) fillTicker(ctx context.Context, ticker models.TickerInfo, star
 
 		iterations++
 		sessionDate = sessionDate.AddDate(0, 0, -1)
+
+		if iterations < s.config.MaxInactiveDays && activeSessions < s.config.SessionsTarget {
+			select {
+			case <-time.After(500 * time.Millisecond):
+			case <-ctx.Done():
+				return stats, ctx.Err()
+			}
+		}
 	}
 
 	return stats, nil
