@@ -149,6 +149,20 @@ func (c *Client) CheckAuthorization(ctx context.Context) error {
 	return ErrUnauthorized
 }
 
+// AccessToken возвращает действующий access-token Alor, автоматически обновляя его при необходимости.
+func (c *Client) AccessToken(ctx context.Context) (string, error) {
+	if c == nil {
+		return "", errors.New("alor: nil client")
+	}
+
+	token, err := c.validAccessToken(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get access token: %w", err)
+	}
+
+	return token, nil
+}
+
 func (c *Client) validAccessToken(ctx context.Context) (string, error) {
 	c.mu.RLock()
 	cached := c.token
