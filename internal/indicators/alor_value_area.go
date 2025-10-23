@@ -31,6 +31,9 @@ const (
 // ErrNoTrades означает, что для указанной сессии не найдено сделок.
 var ErrNoTrades = errors.New("indicators: no trades in main session")
 
+// ErrInvalidInstrument сигнализирует о том, что Alor отверг параметры инструмента.
+var ErrInvalidInstrument = errors.New("indicators: invalid instrument parameters")
+
 // TokenProvider описывает зависимость, способную предоставить access-token Alor.
 type TokenProvider interface {
 	AccessToken(ctx context.Context) (string, error)
@@ -188,13 +191,20 @@ func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string,
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-	case http.StatusNoContent, http.StatusNotFound:
+	case http.StatusNoContent:
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.lastResponse = truncateForLog(body)
 		if len(body) == 0 {
 			c.lastResponse = fmt.Sprintf("status %d without body", resp.StatusCode)
 		}
 		return nil, ErrNoTrades
+	case http.StatusBadRequest, http.StatusNotFound:
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.lastResponse = truncateForLog(body)
+		if len(body) == 0 {
+			c.lastResponse = fmt.Sprintf("status %d without body", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("%w: board=%s secid=%s status=%d", ErrInvalidInstrument, board, secID, resp.StatusCode)
 	default:
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.lastResponse = truncateForLog(body)
