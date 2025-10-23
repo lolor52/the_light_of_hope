@@ -27,8 +27,6 @@ type Credentials struct {
 type PassportClient struct {
 	client        *http.Client
 	credentials   Credentials
-	authOnce      sync.Once
-	authErr       error
 	authMu        sync.Mutex
 	authenticated bool
 }
@@ -53,40 +51,47 @@ func NewPassportClient(creds Credentials) (*PassportClient, error) {
 
 // Do выполняет HTTP-запрос, гарантируя прохождение авторизации заранее.
 func (c *PassportClient) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return nil, err
+	if req == nil {
+		return nil, fmt.Errorf("moex passport: request is nil")
 	}
 
-	req = req.WithContext(ctx)
+	req = req.Clone(ctx)
 	if ua := req.Header.Get("User-Agent"); ua == "" {
 		req.Header.Set("User-Agent", defaultUserAgent)
 	}
 
-	return c.client.Do(req)
+	resp, err := c.do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if shouldReauthenticate(resp.StatusCode) {
+		resp.Body.Close()
+
+		if err := c.reauthenticate(ctx); err != nil {
+			return nil, err
+		}
+
+		retryReq, err := cloneRequest(req)
+		if err != nil {
+			return nil, err
+		}
+
+		return c.do(ctx, retryReq)
+	}
+
+	return resp, nil
 }
 
 func (c *PassportClient) ensureAuthenticated(ctx context.Context) error {
 	c.authMu.Lock()
-	authenticated := c.authenticated
-	c.authMu.Unlock()
-	if authenticated {
+	if c.authenticated {
+		c.authMu.Unlock()
 		return nil
 	}
+	c.authMu.Unlock()
 
-	c.authOnce.Do(func() {
-		c.authErr = c.authenticate(ctx)
-		if c.authErr == nil {
-			c.authMu.Lock()
-			c.authenticated = true
-			c.authMu.Unlock()
-		}
-	})
-
-	if c.authErr != nil {
-		return c.authErr
-	}
-
-	return nil
+	return c.authenticate(ctx)
 }
 
 func (c *PassportClient) authenticate(ctx context.Context) error {
@@ -139,5 +144,49 @@ func (c *PassportClient) authenticate(ctx context.Context) error {
 		return fmt.Errorf("moex passport: %s", result.Error)
 	}
 
+	c.authMu.Lock()
+	c.authenticated = true
+	c.authMu.Unlock()
+
 	return nil
+}
+
+func (c *PassportClient) do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return nil, err
+	}
+
+	return c.client.Do(req)
+}
+
+func (c *PassportClient) reauthenticate(ctx context.Context) error {
+	c.authMu.Lock()
+	c.authenticated = false
+	c.authMu.Unlock()
+
+	return c.ensureAuthenticated(ctx)
+}
+
+func shouldReauthenticate(status int) bool {
+	return status == http.StatusUnauthorized || status == http.StatusForbidden
+}
+
+func cloneRequest(req *http.Request) (*http.Request, error) {
+	if req.Body != nil && req.Body != http.NoBody && req.GetBody == nil {
+		return nil, fmt.Errorf("moex passport: cannot replay request with non-rewindable body")
+	}
+
+	clone := req.Clone(req.Context())
+	if req.Body == nil || req.Body == http.NoBody {
+		clone.Body = req.Body
+		return clone, nil
+	}
+
+	body, err := req.GetBody()
+	if err != nil {
+		return nil, fmt.Errorf("moex passport: clone body: %w", err)
+	}
+	clone.Body = body
+
+	return clone, nil
 }
