@@ -154,9 +154,11 @@ func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string,
 	if c.httpClient == nil {
 		return nil, errors.New("indicators: http client is required")
 	}
-	if strings.TrimSpace(board) == "" {
+	board = strings.TrimSpace(board)
+	if board == "" {
 		return nil, errors.New("indicators: board is required")
 	}
+	exchange := selectExchange(board)
 	if strings.TrimSpace(secID) == "" {
 		return nil, errors.New("indicators: secid is required")
 	}
@@ -169,7 +171,7 @@ func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string,
 		return nil, fmt.Errorf("obtain access token: %w", err)
 	}
 
-	endpoint := fmt.Sprintf("%s/md/v2/securities/%s/%s/trades", c.baseURL, url.PathEscape(board), url.PathEscape(secID))
+	endpoint := fmt.Sprintf("%s/md/v2/Securities/%s/%s/alltrades", c.baseURL, exchange, url.PathEscape(secID))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -177,8 +179,9 @@ func (c *MarketDataClient) FetchTrades(ctx context.Context, board, secID string,
 	}
 
 	q := req.URL.Query()
-	q.Set("from", from.Format(time.RFC3339))
-	q.Set("to", to.Format(time.RFC3339))
+	q.Set("from", strconv.FormatInt(from.UTC().Unix(), 10))
+	q.Set("to", strconv.FormatInt(to.UTC().Unix(), 10))
+	q.Set("instrumentGroup", board)
 	q.Set("token", token)
 	req.URL.RawQuery = q.Encode()
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -252,6 +255,15 @@ func (c *MarketDataClient) LastResponse() string {
 		return ""
 	}
 	return c.lastResponse
+}
+
+func selectExchange(board string) string {
+	upper := strings.ToUpper(board)
+	if strings.HasPrefix(upper, "SPB") {
+		return "SPBX"
+	}
+
+	return "MOEX"
 }
 
 func truncateForLog(data []byte) string {

@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -77,9 +78,28 @@ func TestMainSessionBounds(t *testing.T) {
 
 func TestFetchTradesReturnsInvalidRequestOn404(t *testing.T) {
 	token := "token"
+	board := "TQBR"
+	from := time.Date(2024, time.January, 2, 7, 0, 0, 0, time.UTC)
+	to := from.Add(2 * time.Hour)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("token"); got != token {
+		if got := r.URL.Path; got != "/md/v2/Securities/MOEX/BAD/alltrades" {
+			t.Fatalf("unexpected path: %q", got)
+		}
+		query := r.URL.Query()
+		if got := query.Get("token"); got != token {
 			t.Fatalf("unexpected token query: %q", got)
+		}
+		if got := query.Get("instrumentGroup"); got != board {
+			t.Fatalf("unexpected instrumentGroup: %q", got)
+		}
+		if got := query.Get("from"); got != strconv.FormatInt(from.Unix(), 10) {
+			t.Fatalf("unexpected from query: %q", got)
+		}
+		if got := query.Get("to"); got != strconv.FormatInt(to.Unix(), 10) {
+			t.Fatalf("unexpected to query: %q", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer "+token {
+			t.Fatalf("unexpected authorization header: %q", got)
 		}
 		http.Error(w, "not found", http.StatusNotFound)
 	}))
@@ -89,9 +109,7 @@ func TestFetchTradesReturnsInvalidRequestOn404(t *testing.T) {
 	client := NewMarketDataClient(server.URL, provider)
 	client.WithHTTPClient(server.Client())
 
-	from := time.Now().Add(-time.Hour)
-	to := time.Now()
-	_, err := client.FetchTrades(context.Background(), "MOEX", "BAD", from, to)
+	_, err := client.FetchTrades(context.Background(), board, "BAD", from, to)
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("expected ErrInvalidRequest, got %v", err)
 	}
