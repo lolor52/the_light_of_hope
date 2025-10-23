@@ -38,10 +38,7 @@ func TestClientCheckAuthorizationUsesCachedToken(t *testing.T) {
 	apiCalls := int32(0)
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&apiCalls, 1)
-		if got := r.URL.Query().Get("token"); got != tokenValue {
-			t.Fatalf("unexpected token parameter: %q", got)
-		}
-		if got := r.Header.Get("Authorization"); got != "" {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+tokenValue {
 			t.Fatalf("unexpected Authorization header: %q", got)
 		}
 
@@ -83,10 +80,7 @@ func TestClientCheckAuthorizationRefreshesWhenTokenAboutToExpire(t *testing.T) {
 	apiCalls := int32(0)
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&apiCalls, 1)
-		if got := r.URL.Query().Get("token"); got != newToken {
-			t.Fatalf("unexpected token parameter: %q", got)
-		}
-		if got := r.Header.Get("Authorization"); got != "" {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+newToken {
 			t.Fatalf("unexpected Authorization header: %q", got)
 		}
 
@@ -127,17 +121,17 @@ func TestClientCheckAuthorizationRetriesOnUnauthorized(t *testing.T) {
 
 	var seenNewToken atomic.Bool
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := r.URL.Query().Get("token")
-		switch token {
-		case oldToken:
+		auth := r.Header.Get("Authorization")
+		switch auth {
+		case "Bearer " + oldToken:
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
-		case newToken:
+		case "Bearer " + newToken:
 			seenNewToken.Store(true)
 			_, _ = w.Write([]byte(`{"levels":[]}`))
 			return
 		default:
-			t.Fatalf("unexpected token parameter: %q", token)
+			t.Fatalf("unexpected Authorization header: %q", auth)
 		}
 	}))
 	t.Cleanup(api.Close)
