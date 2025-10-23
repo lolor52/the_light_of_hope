@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"invest_intraday/models"
@@ -16,6 +17,34 @@ type TickerInfoRepository struct {
 // NewTickerInfoRepository создаёт репозиторий ticker_info на основе подключения к БД.
 func NewTickerInfoRepository(db *sql.DB) *TickerInfoRepository {
 	return &TickerInfoRepository{db: db}
+}
+
+// GetByID возвращает запись ticker_info по первичному ключу.
+func (r *TickerInfoRepository) GetByID(ctx context.Context, id int64) (models.TickerInfo, error) {
+	const query = `
+SELECT id,
+       ticker_name,
+       secid,
+       boardid
+  FROM ticker_info
+ WHERE id = $1
+`
+
+	var entity models.TickerInfo
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&entity.ID,
+		&entity.TickerName,
+		&entity.SecID,
+		&entity.BoardID,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.TickerInfo{}, fmt.Errorf("ticker_info %d: %w", id, sql.ErrNoRows)
+	}
+	if err != nil {
+		return models.TickerInfo{}, fmt.Errorf("select ticker_info: %w", err)
+	}
+
+	return entity, nil
 }
 
 // ListAll возвращает полный перечень тикеров из таблицы ticker_info.
