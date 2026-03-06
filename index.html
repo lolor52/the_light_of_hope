@@ -39,7 +39,7 @@
         <a href="#projects">Проекты</a>
         <a href="#documents">Документы</a>
         <a href="#contacts">Контакты</a>
-        <a class="btn btn-primary btn-compact nav-cta" href="#contacts">Связаться</a>
+        <button class="btn btn-primary btn-compact nav-cta donate-trigger" type="button" data-modal-open="donate-modal">Хочу помочь</button>
       </nav>
     </div>
 
@@ -50,7 +50,7 @@
         <a href="#projects">Проекты</a>
         <a href="#documents">Документы</a>
         <a href="#contacts">Контакты</a>
-        <a class="btn btn-primary nav-cta" href="#contacts">Связаться</a>
+        <button class="btn btn-primary nav-cta donate-trigger" type="button" data-modal-open="donate-modal">Хочу помочь</button>
       </div>
     </nav>
   </header>
@@ -66,10 +66,8 @@
             МДЦ «Свет Надежды» ведёт свою деятельность с 1997 года и оказывает благотворительную помощь тем,
             кто особенно нуждается в поддержке, заботе и внимании.
           </p>
-          <p class="latin-motto">Dum spiro, spero.</p>
           <div class="button-row">
-            <a class="btn btn-primary" href="#contacts">Связаться с нами</a>
-            <a class="btn btn-secondary" href="#documents">Смотреть документы</a>
+            <button class="btn btn-primary donate-trigger hero-donate-btn" type="button" data-modal-open="donate-modal">Хочу помочь</button>
           </div>
         </div>
 
@@ -123,7 +121,7 @@
           </article>
         </div>
 
-        <a class="btn btn-secondary section-action" href="#contacts">Связаться с нами</a>
+        <button class="btn btn-secondary section-action donate-trigger" type="button" data-modal-open="donate-modal">Хочу помочь</button>
       </div>
     </section>
 
@@ -177,18 +175,64 @@
         <div class="panel documents-panel">
           <div class="documents-copy">
             <p class="section-label">Документы</p>
-            <h2>Основные документы организации</h2>
-            <p>В этом разделе собраны основные документы АНО МДЦ «Свет Надежды».</p>
-            <p>При необходимости, на основании официального запроса, АНО МДЦ «Свет Надежды» готова предоставить дополнительные документы, если это не противоречит законодательству Российской Федерации.</p>
+            <h2>Учредительные и регистрационные документы</h2>
+            <p>В этом разделе собраны основные официальные документы АНО МДЦ «Свет Надежды», которые подтверждают статус и деятельность организации.</p>
+            <p>Все документы открываются в новой вкладке для удобного просмотра.</p>
+            <p class="documents-note">Актуально на <time datetime="2026-03-06">6 марта 2026 года</time>.</p>
           </div>
 
-          <ul class="documents-list">
-            <li><span class="document-mark" aria-hidden="true">01</span><span>Устав</span></li>
-            <li><span class="document-mark" aria-hidden="true">02</span><span>Свидетельство о государственной регистрации</span></li>
-            <li><span class="document-mark" aria-hidden="true">03</span><span>Свидетельство о постановке на учет в налоговом органе</span></li>
-            <li><span class="document-mark" aria-hidden="true">04</span><span>Свидетельство о внесении записи в ЕГРЮЛ</span></li>
-            <li><span class="document-mark" aria-hidden="true">05</span><span>Изменения в ЕГРЮЛ</span></li>
-          </ul>
+          <div class="documents-content">
+            <ul class="documents-list" aria-label="Регистрационные документы">
+              <li>
+                <div class="document-info">
+                  <span class="document-mark" aria-hidden="true">01</span>
+                  <div>
+                    <h3>Устав организации</h3>
+                    <p>Основной учредительный документ организации в формате PDF.</p>
+                  </div>
+                </div>
+                <div class="document-actions">
+                  <a class="btn btn-secondary" href="media/учредительные/ustav.pdf" target="_blank" rel="noreferrer">Открыть</a>
+                </div>
+              </li>
+              <li>
+                <div class="document-info">
+                  <span class="document-mark" aria-hidden="true">02</span>
+                  <div>
+                    <h3>Свидетельство ОГРН</h3>
+                    <p>Подтверждает государственную регистрацию организации.</p>
+                  </div>
+                </div>
+                <div class="document-actions">
+                  <a class="btn btn-secondary" href="media/учредительные/svid-ogrn.jpg" target="_blank" rel="noreferrer">Открыть</a>
+                </div>
+              </li>
+              <li>
+                <div class="document-info">
+                  <span class="document-mark" aria-hidden="true">03</span>
+                  <div>
+                    <h3>Свидетельство ИНН</h3>
+                    <p>Подтверждает постановку организации на налоговый учет.</p>
+                  </div>
+                </div>
+                <div class="document-actions">
+                  <a class="btn btn-secondary" href="media/учредительные/svid-inn.jpg" target="_blank" rel="noreferrer">Открыть</a>
+                </div>
+              </li>
+              <li>
+                <div class="document-info">
+                  <span class="document-mark" aria-hidden="true">04</span>
+                  <div>
+                    <h3>Свидетельство ЕГРЮЛ</h3>
+                    <p>Подтверждает внесение записи об организации в ЕГРЮЛ.</p>
+                  </div>
+                </div>
+                <div class="document-actions">
+                  <a class="btn btn-secondary" href="media/учредительные/svid-egrul.jpg" target="_blank" rel="noreferrer">Открыть</a>
+                </div>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
     </section>
@@ -252,17 +296,44 @@
     </section>
   </main>
 
-  <footer class="site-footer">
-    <div class="container footer-row">
-      <div class="footer-brand">
-        <img src="media/logos/logo.png" alt="Логотип Свет Надежды" width="56" height="56">
-        <div>
-          <p class="footer-title">Международный детский центр «Свет Надежды»</p>
-          <p class="footer-text">Место, где доброта, внимание и участие объединяют людей разных поколений.</p>
+  <div class="modal" id="donate-modal" hidden>
+    <div class="modal-backdrop" data-modal-close="donate-modal"></div>
+    <section class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="donate-modal-title">
+      <button class="modal-close" type="button" aria-label="Закрыть окно" data-modal-close="donate-modal">Закрыть</button>
+      <div class="modal-copy">
+        <p class="section-label">Помощь центру</p>
+        <h2 id="donate-modal-title">Поддержать «Свет Надежды»</h2>
+        <p>Отсканируйте QR-код в банковском приложении, чтобы быстро отправить пожертвование центру.</p>
+      </div>
+      <div class="donate-modal-grid">
+        <div class="donate-qr-card" aria-label="QR-код для пожертвования">
+          <img class="donate-qr-image" src="media/qr/qr.png" alt="QR-код для пожертвования центру «Свет Надежды»">
+        </div>
+        <div class="donate-details">
+          <div class="donate-detail-card">
+            <h3>Как помочь</h3>
+            <p>Наведите камеру телефона или откройте банковское приложение со сканированием QR-кодов и подтвердите перевод. Если удобнее, можно сохранить изображение и открыть его на другом устройстве.</p>
+          </div>
         </div>
       </div>
+    </section>
+  </div>
 
-      <div class="footer-links-wrap">
+  <footer class="site-footer">
+    <div class="container footer-row">
+      <div class="footer-brand-block">
+        <div class="footer-brand">
+          <img src="media/logos/logo.png" alt="Логотип Свет Надежды" width="56" height="56">
+          <div>
+            <p class="footer-title">Международный детский центр «Свет Надежды»</p>
+            <p class="footer-text">Место, где доброта, внимание и участие объединяют людей разных поколений.</p>
+          </div>
+        </div>
+        <p class="footer-motto">Пока дышу — надеюсь</p>
+      </div>
+
+      <div class="footer-nav-block">
+        <p class="footer-heading">Разделы</p>
         <nav class="footer-links" aria-label="Ссылки в подвале">
           <a href="#about">О центре</a>
           <a href="#help">Как помогаем</a>
@@ -270,7 +341,18 @@
           <a href="#documents">Документы</a>
           <a href="#contacts">Контакты</a>
         </nav>
-        <p class="footer-motto">Пока дышу — надеюсь</p>
+      </div>
+
+      <div class="footer-contact-block">
+        <p class="footer-heading">На связи</p>
+        <div class="footer-contact-list">
+          <a href="tel:+79052536221">+7 905 253-62-21</a>
+          <a href="mailto:ano-mdc-sn@yandex.ru">ano-mdc-sn@yandex.ru</a>
+          <a href="https://vk.com/svet_nad" target="_blank" rel="noreferrer">vk.com/svet_nad</a>
+        </div>
+        <div class="footer-actions">
+          <button class="btn btn-primary donate-trigger" type="button" data-modal-open="donate-modal">Хочу помочь</button>
+        </div>
         <p class="footer-copyright">© 1997–2026 Международный детский центр «Свет Надежды»</p>
       </div>
     </div>
