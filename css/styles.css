@@ -679,7 +679,7 @@ ul {
   z-index: 1;
   display: grid;
   gap: 1.5rem;
-  width: min(100%, 62rem);
+  width: min(100%, 36rem);
   max-height: calc(100vh - 2rem);
   overflow: auto;
   padding: 1.5rem;
@@ -691,11 +691,11 @@ ul {
   box-shadow: 0 32px 80px rgba(31, 42, 28, 0.22);
 }
 
-.modal-copy,
-.donate-details,
-.donate-detail-card {
+.modal-copy {
   display: grid;
   gap: 1rem;
+  justify-items: center;
+  text-align: center;
 }
 
 .modal-close {
@@ -714,20 +714,20 @@ ul {
 .donate-modal-grid {
   display: grid;
   gap: 1rem;
-}
-
-.donate-qr-card,
-.donate-detail-card {
-  padding: 1.25rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-card);
-  background: rgba(255, 255, 255, 0.82);
+  justify-items: center;
 }
 
 .donate-qr-card {
   display: grid;
   place-items: center;
+  gap: 1rem;
+  width: min(100%, 22rem);
   min-height: 19rem;
+  padding: 1.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  text-align: center;
+  background: rgba(255, 255, 255, 0.82);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(149, 181, 84, 0.08));
 }
 
@@ -737,6 +737,11 @@ ul {
   object-fit: contain;
   border-radius: 1.5rem;
   background: #fff;
+}
+
+.donate-qr-note {
+  color: var(--color-text-muted);
+  line-height: 1.7;
 }
 
 .footer-actions,
@@ -852,8 +857,7 @@ body.modal-open {
   }
 
   .donate-modal-grid {
-    grid-template-columns: minmax(17rem, 21rem) minmax(0, 1fr);
-    align-items: start;
+    grid-template-columns: 1fr;
   }
 
   .footer-row {
